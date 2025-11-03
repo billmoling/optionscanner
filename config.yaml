@@ -1,0 +1,18 @@
+ibkr:
+  host: "127.0.0.1"
+  port: 4002
+  client_id: 1
+tickers:
+  - NVDA
+  - AAPL
+  - TSLA
+  - META
+  - AMZN
+  - MSFT
+  - GOOG
+  - NFLX
+  - AMD
+  - JPM
+update_interval_minutes: 5
+log_dir: "./logs"
+data_dir: "./data"

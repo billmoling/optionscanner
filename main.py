@@ -1,0 +1,247 @@
+"""Main entry point for the option scanner using NautilusTrader and IBKR."""
+from __future__ import annotations
+
+import asyncio
+import importlib
+import pkgutil
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Iterable, List
+
+import pandas as pd
+import yaml
+from ib_insync import IB, Option, Stock
+from loguru import logger
+
+from logging_utils import configure_logging
+from strategies.base import BaseOptionStrategy, TradeSignal
+
+
+@dataclass(slots=True)
+class OptionChainSnapshot:
+    """Container for option chain data for a given symbol."""
+
+    symbol: str
+    underlying_price: float
+    timestamp: datetime
+    options: List[Dict[str, Any]]
+
+    def to_pandas(self) -> pd.DataFrame:
+        df = pd.DataFrame(self.options)
+        if df.empty:
+            return df
+        df["symbol"] = self.symbol
+        df["underlying_price"] = self.underlying_price
+        df["timestamp"] = self.timestamp
+        df["expiry"] = pd.to_datetime(df["expiry"])
+        return df
+
+
+class IBKRDataFetcher:
+    """Handles IBKR data retrieval using ib_insync with Nautilus compatibility."""
+
+    def __init__(self, host: str, port: int, client_id: int, data_dir: Path) -> None:
+        self.host = host
+        self.port = port
+        self.client_id = client_id
+        self.data_dir = data_dir
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._ib = IB()
+        self._lock = asyncio.Lock()
+
+    async def connect(self) -> None:
+        async with self._lock:
+            if self._ib.isConnected():
+                return
+            logger.info(
+                "Connecting to IBKR Gateway host={host} port={port} client_id={client_id}",
+                host=self.host,
+                port=self.port,
+                client_id=self.client_id,
+            )
+            await self._ib.connectAsync(self.host, self.port, clientId=self.client_id, timeout=5)
+            if not self._ib.isConnected():
+                raise ConnectionError("Failed to connect to IBKR Gateway")
+            logger.info("Successfully connected to IBKR Gateway")
+
+    async def disconnect(self) -> None:
+        if self._ib.isConnected():
+            self._ib.disconnect()
+
+    async def fetch_option_chain(self, symbol: str) -> OptionChainSnapshot:
+        await self.connect()
+        contract = Stock(symbol, "SMART", "USD")
+        await self._ib.qualifyContractsAsync(contract)
+        ticker = await self._ib.reqMktDataAsync(contract, "", False, False)
+        underlying_price = float(ticker.last or ticker.close or ticker.marketPrice() or 0.0)
+
+        params = await self._ib.reqSecDefOptParamsAsync(
+            contract.symbol,
+            "",
+            contract.secType,
+            contract.conId,
+        )
+        if not params:
+            raise RuntimeError(f"No option parameters returned for {symbol}")
+        # Select SMART exchange chain with most strikes
+        chain = max(params, key=lambda p: len(p.strikes))
+        target_expiries = sorted(chain.expirations)[:4]
+        strikes = sorted(chain.strikes, key=lambda x: abs(x - underlying_price))[:40]
+        options: List[Contract] = []
+        for expiry in target_expiries:
+            for strike in strikes:
+                options.append(Option(symbol, expiry, strike, "C", "SMART", currency="USD"))
+                options.append(Option(symbol, expiry, strike, "P", "SMART", currency="USD"))
+        qualified = await self._ib.qualifyContractsAsync(*options)
+        if not qualified:
+            raise RuntimeError(f"Unable to qualify options for {symbol}")
+
+        tickers = await self._ib.reqTickersAsync(*qualified)
+        rows: List[Dict[str, Any]] = []
+        now = datetime.utcnow()
+        for ticker in tickers:
+            contract = ticker.contract
+            if not isinstance(contract, Option):
+                continue
+            expiry_dt = datetime.strptime(contract.lastTradeDateOrContractMonth, "%Y%m%d")
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "expiry": expiry_dt,
+                    "strike": float(contract.strike),
+                    "option_type": "CALL" if contract.right == "C" else "PUT",
+                    "bid": float(ticker.bid or 0.0),
+                    "ask": float(ticker.ask or 0.0),
+                    "mark": float(ticker.midpoint() or 0.0),
+                    "delta": getattr(ticker.modelGreeks, "delta", 0.0) if ticker.modelGreeks else 0.0,
+                    "theta": getattr(ticker.modelGreeks, "theta", 0.0) if ticker.modelGreeks else 0.0,
+                    "implied_volatility": getattr(ticker.modelGreeks, "impliedVol", 0.0)
+                    if ticker.modelGreeks
+                    else 0.0,
+                }
+            )
+        snapshot = OptionChainSnapshot(
+            symbol=symbol,
+            underlying_price=underlying_price,
+            timestamp=now,
+            options=rows,
+        )
+        self._persist_snapshot(snapshot)
+        return snapshot
+
+    def _persist_snapshot(self, snapshot: OptionChainSnapshot) -> None:
+        df = snapshot.to_pandas()
+        if df.empty:
+            return
+        timestamp_str = snapshot.timestamp.strftime("%Y%m%d_%H%M%S")
+        file_path = self.data_dir / f"{snapshot.symbol}_{timestamp_str}.parquet"
+        df.to_parquet(file_path, index=False)
+        logger.info("Saved option snapshot to {path}", path=str(file_path))
+
+    async def fetch_all(self, symbols: Iterable[str]) -> List[OptionChainSnapshot]:
+        tasks = [self.fetch_option_chain(symbol) for symbol in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        snapshots: List[OptionChainSnapshot] = []
+        for symbol, result in zip(symbols, results):
+            if isinstance(result, Exception):
+                logger.exception("Failed to fetch data for {symbol}", symbol=symbol)
+                continue
+            snapshots.append(result)
+        return snapshots
+
+
+def load_config(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def discover_strategies() -> List[BaseOptionStrategy]:
+    strategy_dir = Path(__file__).parent / "strategies"
+    strategies: List[BaseOptionStrategy] = []
+    for module_info in pkgutil.iter_modules([str(strategy_dir)]):
+        if not module_info.name.startswith("strategy_"):
+            continue
+        module = importlib.import_module(f"strategies.{module_info.name}")
+        for attr in dir(module):
+            obj = getattr(module, attr)
+            if (
+                isinstance(obj, type)
+                and issubclass(obj, BaseOptionStrategy)
+                and obj is not BaseOptionStrategy
+            ):
+                try:
+                    strategies.append(obj())
+                except TypeError as exc:
+                    logger.error(
+                        "Failed to instantiate strategy {name}: {error}",
+                        name=obj.__name__,
+                        error=exc,
+                    )
+    logger.info("Loaded {count} strategies", count=len(strategies))
+    return strategies
+
+
+async def run_once(
+    fetcher: IBKRDataFetcher,
+    strategies: List[BaseOptionStrategy],
+    symbols: Iterable[str],
+    results_dir: Path,
+) -> None:
+    snapshots = await fetcher.fetch_all(symbols)
+    aggregated_signals: List[TradeSignal] = []
+    for strategy in strategies:
+        try:
+            signals = strategy.on_data(snapshots)
+            aggregated_signals.extend(signals)
+        except Exception as exc:
+            logger.exception("Strategy {name} failed", name=strategy.name)
+    if not aggregated_signals:
+        logger.info("No trade signals generated in this iteration")
+        return
+    results_dir.mkdir(parents=True, exist_ok=True)
+    rows = [signal.__dict__ for signal in aggregated_signals]
+    df = pd.DataFrame(rows)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    file_path = results_dir / f"signals_{timestamp}.csv"
+    df.to_csv(file_path, index=False)
+    logger.info("Saved {count} signals to {path}", count=len(df), path=str(file_path))
+
+
+async def run_scheduler(config: Dict[str, Any]) -> None:
+    log_dir = Path(config.get("log_dir", "./logs"))
+    configure_logging(log_dir, "strategy_signals")
+    data_dir = Path(config.get("data_dir", "./data"))
+    fetcher = IBKRDataFetcher(
+        host=config["ibkr"]["host"],
+        port=config["ibkr"]["port"],
+        client_id=config["ibkr"].get("client_id", 1),
+        data_dir=data_dir,
+    )
+    strategies = discover_strategies()
+    symbols = config.get("tickers", [])
+    results_dir = Path("./results")
+    interval = int(config.get("update_interval_minutes", 5)) * 60
+    while True:
+        start = datetime.utcnow()
+        logger.info("Starting scheduled run at {start}", start=start.isoformat())
+        try:
+            await run_once(fetcher, strategies, symbols, results_dir)
+        except Exception as exc:
+            logger.exception("Run failed: {error}", error=exc)
+        duration = (datetime.utcnow() - start).total_seconds()
+        sleep_time = max(interval - duration, 0)
+        logger.info("Run completed in {duration:.2f}s. Sleeping for {sleep:.2f}s", duration=duration, sleep=sleep_time)
+        await asyncio.sleep(sleep_time)
+
+
+def main() -> None:
+    config = load_config(Path("config.yaml"))
+    try:
+        asyncio.run(run_scheduler(config))
+    except KeyboardInterrupt:
+        logger.info("Shutdown requested by user")
+
+
+if __name__ == "__main__":
+    main()

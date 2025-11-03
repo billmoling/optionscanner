@@ -1,0 +1,7 @@
+nautilus_trader
+pandas
+ib_insync
+loguru
+asyncio
+schedule
+pyyaml
