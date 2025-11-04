@@ -1,0 +1,39 @@
+# === Python / uv environment ===
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# uv cache
+.uv-cache/
+.uv/
+.python-version
+
+# === VS Code ===
+.vscode/
+.history/
+*.code-workspace
+
+# === Logs & Data ===
+logs/
+data/
+results/
+*.log
+*.csv
+*.parquet
+
+# === OS-specific ===
+.DS_Store
+Thumbs.db
+
+# === Temporary / Backup files ===
+*.bak
+*.tmp
+*.swp
+*.swo
+*~
+
+# === NautilusTrader specific (local storage, cache) ===
+nautilus_trader_data/
+nautilus_trader_logs/

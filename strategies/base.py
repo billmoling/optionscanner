@@ -4,7 +4,7 @@ from __future__ import annotations
 import abc
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Optional
 
 from loguru import logger
 
@@ -31,8 +31,12 @@ class TradeSignal:
 class BaseOptionStrategy(Strategy, abc.ABC):
     """Abstract base class for option strategies using NautilusTrader."""
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, name: Optional[str] = None, **kwargs) -> None:
         super().__init__(**kwargs)
+        if name is not None:
+            self.name = name
+        elif not hasattr(self, "name") or getattr(self, "name", None) in (None, ""):
+            self.name = self.__class__.__name__
         logger.debug("Initialized strategy: {name}", name=self.name)
 
     @abc.abstractmethod
