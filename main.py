@@ -1,13 +1,14 @@
 """Main entry point for the option scanner using NautilusTrader and IBKR."""
 from __future__ import annotations
 
+import argparse
 import asyncio
 import importlib
 import pkgutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
 import yaml
@@ -16,6 +17,14 @@ from loguru import logger
 
 from logging_utils import configure_logging
 from strategies.base import BaseOptionStrategy, TradeSignal
+
+
+MARKET_DATA_TYPE_CODES = {
+    "LIVE": 1,
+    "FROZEN": 2,
+    "DELAYED": 3,
+    "DELAYED_FROZEN": 4,
+}
 
 
 @dataclass(slots=True)
@@ -41,11 +50,25 @@ class OptionChainSnapshot:
 class IBKRDataFetcher:
     """Handles IBKR data retrieval using ib_insync with Nautilus compatibility."""
 
-    def __init__(self, host: str, port: int, client_id: int, data_dir: Path) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        client_id: int,
+        data_dir: Path,
+        market_data_type: str,
+    ) -> None:
         self.host = host
         self.port = port
         self.client_id = client_id
         self.data_dir = data_dir
+        self.market_data_type = market_data_type.upper()
+        if self.market_data_type not in MARKET_DATA_TYPE_CODES:
+            raise ValueError(
+                f"Unsupported market data type '{market_data_type}'. "
+                f"Choose one of {sorted(MARKET_DATA_TYPE_CODES)}."
+            )
+        self._market_data_type_code = MARKET_DATA_TYPE_CODES[self.market_data_type]
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._ib = IB()
         self._lock = asyncio.Lock()
@@ -63,6 +86,11 @@ class IBKRDataFetcher:
             await self._ib.connectAsync(self.host, self.port, clientId=self.client_id, timeout=5)
             if not self._ib.isConnected():
                 raise ConnectionError("Failed to connect to IBKR Gateway")
+            self._ib.reqMarketDataType(self._market_data_type_code)
+            logger.info(
+                "Set IBKR market data type to {market_data_type}",
+                market_data_type=self.market_data_type,
+            )
             logger.info("Successfully connected to IBKR Gateway")
 
     async def disconnect(self) -> None:
@@ -208,7 +236,7 @@ async def run_once(
     logger.info("Saved {count} signals to {path}", count=len(df), path=str(file_path))
 
 
-async def run_scheduler(config: Dict[str, Any]) -> None:
+async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
     log_dir = Path(config.get("log_dir", "./logs"))
     configure_logging(log_dir, "strategy_signals")
     data_dir = Path(config.get("data_dir", "./data"))
@@ -217,6 +245,7 @@ async def run_scheduler(config: Dict[str, Any]) -> None:
         port=config["ibkr"]["port"],
         client_id=config["ibkr"].get("client_id", 1),
         data_dir=data_dir,
+        market_data_type=market_data_type,
     )
     strategies = discover_strategies()
     symbols = config.get("tickers", [])
@@ -235,10 +264,23 @@ async def run_scheduler(config: Dict[str, Any]) -> None:
         await asyncio.sleep(sleep_time)
 
 
-def main() -> None:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the Nautilus option scanner.")
+    parser.add_argument(
+        "--mode",
+        choices=["testing", "live"],
+        default="testing",
+        help="Choose 'testing' for delayed frozen data (default) or 'live' for real-time market data.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    args = parse_args(argv)
+    market_data_type = "DELAYED_FROZEN" if args.mode == "testing" else "LIVE"
     config = load_config(Path("config.yaml"))
     try:
-        asyncio.run(run_scheduler(config))
+        asyncio.run(run_scheduler(config, market_data_type))
     except KeyboardInterrupt:
         logger.info("Shutdown requested by user")
 
