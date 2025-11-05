@@ -4,3 +4,4 @@ loguru
 asyncio
 schedule
 pyyaml
+google-generativeai

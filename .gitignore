@@ -34,6 +34,11 @@ Thumbs.db
 *.swo
 *~
 
+# === Secrets ===
+secrets.yaml
+.secrets.yaml
+config/secrets.yaml
+
 # === NautilusTrader specific (local storage, cache) ===
 nautilus_trader_data/
 nautilus_trader_logs/

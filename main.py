@@ -17,6 +17,7 @@ from loguru import logger
 
 from logging_utils import configure_logging
 from strategies.base import BaseOptionStrategy, TradeSignal
+from ai_agents import SignalExplainAgent, SignalValidationAgent
 
 
 MARKET_DATA_TYPE_CODES = {
@@ -228,7 +229,22 @@ async def run_once(
         logger.info("No trade signals generated in this iteration")
         return
     results_dir.mkdir(parents=True, exist_ok=True)
-    rows = [signal.__dict__ for signal in aggregated_signals]
+    explain_agent = SignalExplainAgent()
+    validation_agent = SignalValidationAgent()
+    snapshot_by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
+    rows = []
+    for signal in aggregated_signals:
+        snapshot = snapshot_by_symbol.get(signal.symbol)
+        explanation = explain_agent.explain(signal, snapshot)
+        validation = validation_agent.review(signal, snapshot, aggregated_signals)
+        row = signal.__dict__.copy()
+        row.update(
+            {
+                "explanation": explanation,
+                "validation": validation,
+            }
+        )
+        rows.append(row)
     df = pd.DataFrame(rows)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     file_path = results_dir / f"signals_{timestamp}.csv"
