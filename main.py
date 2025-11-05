@@ -6,9 +6,11 @@ import asyncio
 import importlib
 import pkgutil
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yaml
@@ -18,6 +20,7 @@ from loguru import logger
 from logging_utils import configure_logging
 from strategies.base import BaseOptionStrategy, TradeSignal
 from ai_agents import SignalExplainAgent, SignalValidationAgent
+from notifications import EmailNotifier
 
 
 MARKET_DATA_TYPE_CODES = {
@@ -216,6 +219,7 @@ async def run_once(
     strategies: List[BaseOptionStrategy],
     symbols: Iterable[str],
     results_dir: Path,
+    email_notifier: Optional[EmailNotifier] = None,
 ) -> None:
     snapshots = await fetcher.fetch_all(symbols)
     aggregated_signals: List[TradeSignal] = []
@@ -251,6 +255,10 @@ async def run_once(
     df.to_csv(file_path, index=False)
     logger.info("Saved {count} signals to {path}", count=len(df), path=str(file_path))
 
+    if email_notifier:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, email_notifier.send_signals, df, file_path)
+
 
 async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
     log_dir = Path(config.get("log_dir", "./logs"))
@@ -266,18 +274,56 @@ async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
     strategies = discover_strategies()
     symbols = config.get("tickers", [])
     results_dir = Path("./results")
-    interval = int(config.get("update_interval_minutes", 5)) * 60
+    email_notifier = EmailNotifier(config.get("email"))
+
+    schedule_config = config.get("schedule", {})
+    schedule_time_str = str(schedule_config.get("time", "07:00"))
+    timezone_name = schedule_config.get("timezone", "America/Los_Angeles")
+
+    try:
+        scheduled_time = datetime.strptime(schedule_time_str, "%H:%M").time()
+    except ValueError:
+        logger.warning("Invalid schedule time '{time}', defaulting to 07:00", time=schedule_time_str)
+        scheduled_time = datetime.strptime("07:00", "%H:%M").time()
+
+    try:
+        tz = ZoneInfo(timezone_name)
+    except Exception:
+        logger.warning("Invalid timezone '{timezone}', defaulting to UTC", timezone=timezone_name)
+        tz = ZoneInfo("UTC")
+
+    def compute_next_run(now: datetime) -> datetime:
+        target = now.replace(
+            hour=scheduled_time.hour,
+            minute=scheduled_time.minute,
+            second=0,
+            microsecond=0,
+        )
+        if now >= target:
+            target += timedelta(days=1)
+        return target
+
+    next_run: Optional[datetime] = None
     while True:
-        start = datetime.utcnow()
+        now = datetime.now(tz)
+        if next_run is None or now >= next_run:
+            next_run = compute_next_run(now)
+        sleep_seconds = max((next_run - now).total_seconds(), 0.0)
+        logger.info(
+            "Next run scheduled at {next_time} (sleeping {seconds:.2f}s)",
+            next_time=next_run.isoformat(),
+            seconds=sleep_seconds,
+        )
+        await asyncio.sleep(sleep_seconds)
+        start = datetime.now(tz)
         logger.info("Starting scheduled run at {start}", start=start.isoformat())
         try:
-            await run_once(fetcher, strategies, symbols, results_dir)
+            await run_once(fetcher, strategies, symbols, results_dir, email_notifier=email_notifier)
         except Exception as exc:
             logger.exception("Run failed: {error}", error=exc)
-        duration = (datetime.utcnow() - start).total_seconds()
-        sleep_time = max(interval - duration, 0)
-        logger.info("Run completed in {duration:.2f}s. Sleeping for {sleep:.2f}s", duration=duration, sleep=sleep_time)
-        await asyncio.sleep(sleep_time)
+        duration = (datetime.now(tz) - start).total_seconds()
+        logger.info("Run completed in {duration:.2f}s", duration=duration)
+        next_run = None
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
