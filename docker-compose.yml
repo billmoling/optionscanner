@@ -1,0 +1,31 @@
+version: "3.9"
+
+networks:
+  ibkr-net:
+    driver: bridge
+
+services:
+  ibkr-gateway:
+    image: ghcr.io/ibkrcampus/ibkr-gateway:stable
+    restart: unless-stopped
+    environment:
+      TWS_USERID: ${TWS_USERID:?Set TWS_USERID to your IBKR username}
+      TWS_PASSWORD: ${TWS_PASSWORD:?Set TWS_PASSWORD to your IBKR password}
+      IAPI_CLIENT_ID: ${IAPI_CLIENT_ID:-1}
+      TRADING_MODE: ${TRADING_MODE:-paper}
+    volumes:
+      - ./gateway/config:/home/ibkr/.ibgateway
+      - ./gateway/logs:/home/ibkr/logs
+    networks:
+      - ibkr-net
+
+  optionscanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - ibkr-gateway
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - ibkr-net

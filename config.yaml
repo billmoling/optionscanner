@@ -1,5 +1,5 @@
 ibkr:
-  host: "127.0.0.1"
+  host: "ibkr-gateway"
   port: 4002
   client_id: 1
 tickers:
