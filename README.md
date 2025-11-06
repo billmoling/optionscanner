@@ -131,3 +131,13 @@ python -m unittest tests.test_slack_notifier_integration
 ```
 
 Set `SLACK_TEST_CHANNEL` in `.env` if you need to override the default channel for integration runs. The test is skipped automatically when no webhook is configured.
+
+### Gemini integration test
+
+To confirm Gemini prompts work end-to-end, provide `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) in `.env` and run:
+
+```bash
+python -m unittest tests.test_ai_agents_integration
+```
+
+The test uses your live Gemini access to generate an explanation for a sample trade signal and prints the response to the console. It is skipped automatically when the API key or `google-generativeai` package is missing.

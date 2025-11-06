@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ai_agents import (
     GeminiClientError,
@@ -28,7 +28,7 @@ class DummyGeminiClient:
 def build_signal() -> TradeSignal:
     return TradeSignal(
         symbol="NVDA",
-        expiry=datetime.utcnow() + timedelta(days=30),
+        expiry=datetime.now(timezone.utc) + timedelta(days=30),
         strike=500.0,
         option_type="CALL",
         direction="LONG_CALL",
@@ -37,7 +37,7 @@ def build_signal() -> TradeSignal:
 
 
 def build_snapshot() -> OptionChainSnapshot:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expiry = now + timedelta(days=30)
     return OptionChainSnapshot(
         symbol="NVDA",
