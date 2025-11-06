@@ -8,7 +8,7 @@ Update `config.yaml` to match your environment:
 
 - `ibkr`: Connection details for the IBKR Gateway or TWS.
 - `tickers`: Symbols to monitor.
-- `schedule`: Daily trigger time. The default runs every day at 7:00 AM Pacific (`America/Los_Angeles`).
+- `schedule`: Daily trigger times. Provide one or more `HH:MM` entries in `times` (e.g., `06:30`, `10:00`, `12:15`) and set the `timezone` (defaults to `America/Los_Angeles`).
 - `slack`: Incoming webhook configuration for delivering formatted results. Set `enabled` to `true` once a valid webhook URL (and optional username/channel overrides) are configured.
 
 Signals are written to the `./results` directory with timestamps. When Slack notifications are enabled, the run summary (with up to the first 10 signals by default) is posted to the configured channel and references the CSV saved locally inside the container.

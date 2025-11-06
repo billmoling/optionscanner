@@ -6,7 +6,7 @@ import asyncio
 import importlib
 import pkgutil
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -21,6 +21,7 @@ from logging_utils import configure_logging
 from strategies.base import BaseOptionStrategy, TradeSignal
 from ai_agents import SignalExplainAgent, SignalValidationAgent
 from notifications import SlackNotifier
+from scheduling import compute_next_run, parse_schedule_times
 
 
 MARKET_DATA_TYPE_CODES = {
@@ -277,14 +278,8 @@ async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
     slack_notifier = SlackNotifier(config.get("slack"))
 
     schedule_config = config.get("schedule", {})
-    schedule_time_str = str(schedule_config.get("time", "07:00"))
+    scheduled_times = parse_schedule_times(schedule_config)
     timezone_name = schedule_config.get("timezone", "America/Los_Angeles")
-
-    try:
-        scheduled_time = datetime.strptime(schedule_time_str, "%H:%M").time()
-    except ValueError:
-        logger.warning("Invalid schedule time '{time}', defaulting to 07:00", time=schedule_time_str)
-        scheduled_time = datetime.strptime("07:00", "%H:%M").time()
 
     try:
         tz = ZoneInfo(timezone_name)
@@ -292,22 +287,15 @@ async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
         logger.warning("Invalid timezone '{timezone}', defaulting to UTC", timezone=timezone_name)
         tz = ZoneInfo("UTC")
 
-    def compute_next_run(now: datetime) -> datetime:
-        target = now.replace(
-            hour=scheduled_time.hour,
-            minute=scheduled_time.minute,
-            second=0,
-            microsecond=0,
-        )
-        if now >= target:
-            target += timedelta(days=1)
-        return target
+    logger.info(
+        "Scheduling runs at {times} ({timezone})",
+        times=", ".join(scheduled_time.strftime("%H:%M") for scheduled_time in scheduled_times),
+        timezone=getattr(tz, "key", str(tz)),
+    )
 
-    next_run: Optional[datetime] = None
     while True:
         now = datetime.now(tz)
-        if next_run is None or now >= next_run:
-            next_run = compute_next_run(now)
+        next_run = compute_next_run(now, scheduled_times)
         sleep_seconds = max((next_run - now).total_seconds(), 0.0)
         logger.info(
             "Next run scheduled at {next_time} (sleeping {seconds:.2f}s)",
@@ -329,7 +317,6 @@ async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
             logger.exception("Run failed: {error}", error=exc)
         duration = (datetime.now(tz) - start).total_seconds()
         logger.info("Run completed in {duration:.2f}s", duration=duration)
-        next_run = None
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:

@@ -16,7 +16,10 @@ tickers:
 log_dir: "./logs"
 data_dir: "./data"
 schedule:
-  time: "07:00"
+  times:
+    - "06:30"
+    - "10:00"
+    - "12:15"
   timezone: "America/Los_Angeles"
 slack:
   enabled: false
