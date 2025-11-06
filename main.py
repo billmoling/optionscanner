@@ -5,10 +5,13 @@ import argparse
 import asyncio
 import importlib
 import pkgutil
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
+
+from enum import Enum
 
 from zoneinfo import ZoneInfo
 
@@ -32,6 +35,14 @@ MARKET_DATA_TYPE_CODES = {
 }
 
 
+class RunMode(str, Enum):
+    """Supported execution modes for the scanner."""
+
+    LOCAL_IMMEDIATE = "local"
+    DOCKER_IMMEDIATE = "docker-immediate"
+    DOCKER_SCHEDULED = "docker-scheduled"
+
+
 @dataclass(slots=True)
 class OptionChainSnapshot:
     """Container for option chain data for a given symbol."""
@@ -52,7 +63,14 @@ class OptionChainSnapshot:
         return df
 
 
-class IBKRDataFetcher:
+class BaseDataFetcher:
+    """Protocol-like base class for data fetchers."""
+
+    async def fetch_all(self, symbols: Iterable[str]) -> List[OptionChainSnapshot]:  # pragma: no cover - interface
+        raise NotImplementedError
+
+
+class IBKRDataFetcher(BaseDataFetcher):
     """Handles IBKR data retrieval using ib_insync with Nautilus compatibility."""
 
     def __init__(
@@ -216,37 +234,43 @@ def discover_strategies() -> List[BaseOptionStrategy]:
 
 
 async def run_once(
-    fetcher: IBKRDataFetcher,
+    fetcher: "BaseDataFetcher",
     strategies: List[BaseOptionStrategy],
     symbols: Iterable[str],
     results_dir: Path,
+    *,
+    explain_agent: Optional[SignalExplainAgent] = None,
+    validation_agent: Optional[SignalValidationAgent] = None,
     slack_notifier: Optional[SlackNotifier] = None,
 ) -> None:
     snapshots = await fetcher.fetch_all(symbols)
-    aggregated_signals: List[TradeSignal] = []
+    aggregated_signals: List[tuple[str, TradeSignal]] = []
     for strategy in strategies:
         try:
             signals = strategy.on_data(snapshots)
-            aggregated_signals.extend(signals)
+            for signal in signals:
+                aggregated_signals.append((strategy.name, signal))
         except Exception as exc:
             logger.exception("Strategy {name} failed", name=strategy.name)
     if not aggregated_signals:
         logger.info("No trade signals generated in this iteration")
         return
     results_dir.mkdir(parents=True, exist_ok=True)
-    explain_agent = SignalExplainAgent()
-    validation_agent = SignalValidationAgent()
+    explain_agent = explain_agent or SignalExplainAgent()
+    validation_agent = validation_agent or SignalValidationAgent()
     snapshot_by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
     rows = []
-    for signal in aggregated_signals:
+    signals_only = [signal for _strategy_name, signal in aggregated_signals]
+    for strategy_name, signal in aggregated_signals:
         snapshot = snapshot_by_symbol.get(signal.symbol)
         explanation = explain_agent.explain(signal, snapshot)
-        validation = validation_agent.review(signal, snapshot, aggregated_signals)
+        validation = validation_agent.review(signal, snapshot, signals_only)
         row = signal.__dict__.copy()
         row.update(
             {
                 "explanation": explanation,
                 "validation": validation,
+                "strategy": strategy_name,
             }
         )
         rows.append(row)
@@ -261,22 +285,14 @@ async def run_once(
         await loop.run_in_executor(None, slack_notifier.send_signals, df, file_path)
 
 
-async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
-    log_dir = Path(config.get("log_dir", "./logs"))
-    configure_logging(log_dir, "strategy_signals")
-    data_dir = Path(config.get("data_dir", "./data"))
-    fetcher = IBKRDataFetcher(
-        host=config["ibkr"]["host"],
-        port=config["ibkr"]["port"],
-        client_id=config["ibkr"].get("client_id", 1),
-        data_dir=data_dir,
-        market_data_type=market_data_type,
-    )
-    strategies = discover_strategies()
-    symbols = config.get("tickers", [])
-    results_dir = Path("./results")
-    slack_notifier = SlackNotifier(config.get("slack"))
-
+async def run_scheduler(
+    config: Dict[str, Any],
+    fetcher: "BaseDataFetcher",
+    strategies: List[BaseOptionStrategy],
+    symbols: Sequence[str],
+    results_dir: Path,
+    slack_notifier: Optional[SlackNotifier],
+) -> None:
     schedule_config = config.get("schedule", {})
     scheduled_times = parse_schedule_times(schedule_config)
     timezone_name = schedule_config.get("timezone", "America/Los_Angeles")
@@ -292,6 +308,9 @@ async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
         times=", ".join(scheduled_time.strftime("%H:%M") for scheduled_time in scheduled_times),
         timezone=getattr(tz, "key", str(tz)),
     )
+
+    explain_agent = SignalExplainAgent()
+    validation_agent = SignalValidationAgent()
 
     while True:
         now = datetime.now(tz)
@@ -311,6 +330,8 @@ async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
                 strategies,
                 symbols,
                 results_dir,
+                explain_agent=explain_agent,
+                validation_agent=validation_agent,
                 slack_notifier=slack_notifier,
             )
         except Exception as exc:
@@ -319,23 +340,186 @@ async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
         logger.info("Run completed in {duration:.2f}s", duration=duration)
 
 
+class DockerControllerError(RuntimeError):
+    """Raised when Docker orchestration fails."""
+
+
+class DockerController:
+    """Utility for managing docker-compose services required by the scanner."""
+
+    def __init__(self, compose_file: Path) -> None:
+        self.compose_file = compose_file
+
+    def start_service(self, service: str) -> None:
+        command = [
+            "docker",
+            "compose",
+            "-f",
+            str(self.compose_file),
+            "up",
+            "-d",
+            service,
+        ]
+        logger.info("Starting docker service {service} via docker compose", service=service)
+        try:
+            subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except FileNotFoundError as exc:
+            raise DockerControllerError("docker command not found. Install Docker to use this mode.") from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.decode("utf-8", "ignore") if exc.stderr else ""
+            raise DockerControllerError(
+                f"Failed to start docker service '{service}': {stderr.strip()}"
+            ) from exc
+
+
+class LocalDataFetcher(BaseDataFetcher):
+    """Loads pre-recorded option data from disk for offline testing."""
+
+    def __init__(self, data_dir: Path) -> None:
+        self.data_dir = data_dir
+
+    async def fetch_all(self, symbols: Iterable[str]) -> List[OptionChainSnapshot]:
+        loop = asyncio.get_running_loop()
+        tasks = [loop.run_in_executor(None, self._load_snapshot, symbol) for symbol in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        snapshots: List[OptionChainSnapshot] = []
+        for symbol, result in zip(symbols, results):
+            if isinstance(result, Exception):
+                logger.exception("Failed to load local data for {symbol}", symbol=symbol)
+                continue
+            snapshots.append(result)
+        return snapshots
+
+    def _load_snapshot(self, symbol: str) -> OptionChainSnapshot:
+        if not self.data_dir.exists():
+            raise FileNotFoundError(f"Local data directory '{self.data_dir}' does not exist")
+        pattern = f"{symbol}_*.parquet"
+        matches = sorted(self.data_dir.glob(pattern))
+        if not matches:
+            raise FileNotFoundError(
+                f"No local snapshot found for {symbol}. Expected files matching {pattern} in {self.data_dir}"
+            )
+        latest = matches[-1]
+        df = pd.read_parquet(latest)
+        if df.empty:
+            raise ValueError(f"Local snapshot {latest} is empty")
+        timestamp = pd.to_datetime(df["timestamp"].iloc[0])
+        underlying_price = float(df["underlying_price"].iloc[0])
+        options = df.drop(columns=[col for col in ("symbol", "underlying_price", "timestamp") if col in df.columns])
+        return OptionChainSnapshot(
+            symbol=symbol,
+            underlying_price=underlying_price,
+            timestamp=timestamp.to_pydatetime(),
+            options=options.to_dict(orient="records"),
+        )
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Nautilus option scanner.")
     parser.add_argument(
-        "--mode",
-        choices=["testing", "live"],
-        default="testing",
-        help="Choose 'testing' for delayed frozen data (default) or 'live' for real-time market data.",
+        "--run-mode",
+        choices=[mode.value for mode in RunMode],
+        default=RunMode.LOCAL_IMMEDIATE.value,
+        help="Select how the scanner executes: local (no Docker), docker-immediate, or docker-scheduled.",
+    )
+    parser.add_argument(
+        "--market-data",
+        choices=sorted(MARKET_DATA_TYPE_CODES.keys()),
+        default="DELAYED_FROZEN",
+        help="Market data type requested from IBKR when using live data fetchers.",
+    )
+    parser.add_argument(
+        "--compose-file",
+        type=Path,
+        default=Path("docker-compose.yml"),
+        help="Path to the docker-compose file used when starting Docker services.",
+    )
+    parser.add_argument(
+        "--docker-service",
+        default="ibkr-gateway",
+        help="Name of the docker-compose service that hosts the IBKR gateway.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("config.yaml"),
+        help="Configuration file for the scanner.",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
-    market_data_type = "DELAYED_FROZEN" if args.mode == "testing" else "LIVE"
-    config = load_config(Path("config.yaml"))
+    config = load_config(args.config)
+    log_dir = Path(config.get("log_dir", "./logs"))
+    configure_logging(log_dir, "strategy_signals")
+
+    results_dir = Path(config.get("results_dir", "./results"))
+    slack_notifier = SlackNotifier(config.get("slack"))
+    strategies = discover_strategies()
+    symbols: Sequence[str] = config.get("tickers", [])
+    run_mode = RunMode(args.run_mode)
+
+    explain_agent = SignalExplainAgent()
+    validation_agent = SignalValidationAgent()
+
+    if run_mode is RunMode.LOCAL_IMMEDIATE:
+        fetcher = LocalDataFetcher(Path(config.get("data_dir", "./data")))
+        try:
+            asyncio.run(
+                run_once(
+                    fetcher,
+                    strategies,
+                    symbols,
+                    results_dir,
+                    explain_agent=explain_agent,
+                    validation_agent=validation_agent,
+                    slack_notifier=slack_notifier,
+                )
+            )
+        except KeyboardInterrupt:
+            logger.info("Shutdown requested by user")
+        return
+
+    docker_controller = DockerController(Path(args.compose_file))
     try:
-        asyncio.run(run_scheduler(config, market_data_type))
+        docker_controller.start_service(args.docker_service)
+    except DockerControllerError as exc:
+        logger.error("Unable to start Docker service: {error}", error=exc)
+        raise SystemExit(1) from exc
+
+    fetcher = IBKRDataFetcher(
+        host=config["ibkr"]["host"],
+        port=config["ibkr"]["port"],
+        client_id=config["ibkr"].get("client_id", 1),
+        data_dir=Path(config.get("data_dir", "./data")),
+        market_data_type=args.market_data,
+    )
+
+    try:
+        if run_mode is RunMode.DOCKER_IMMEDIATE:
+            asyncio.run(
+                run_once(
+                    fetcher,
+                    strategies,
+                    symbols,
+                    results_dir,
+                    explain_agent=explain_agent,
+                    validation_agent=validation_agent,
+                    slack_notifier=slack_notifier,
+                )
+            )
+        else:
+            asyncio.run(
+                run_scheduler(
+                    config,
+                    fetcher,
+                    strategies,
+                    symbols,
+                    results_dir,
+                    slack_notifier,
+                )
+            )
     except KeyboardInterrupt:
         logger.info("Shutdown requested by user")
 

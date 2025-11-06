@@ -55,6 +55,68 @@ The repository ships with a `docker-compose.yml` file that starts both the IBKR 
 7. **Clean up.**
    Stop the services and remove the containers with `docker compose down`. Persistent gateway data remains inside the `gateway/` directory.
 
-## Local development
+## Running the scanner
 
-When running the scanner directly on your workstation, ensure the IBKR Gateway is reachable and adjust `config.yaml` accordingly. Install dependencies with `pip install -r requirements.txt` and run `python main.py`.
+The scanner supports three execution modes that control how market data is sourced and whether Docker is required. All modes share the same configuration file (`config.yaml`) and logging/output directories.
+
+Install dependencies locally with `pip install -r requirements.txt` before running any of the commands below.
+
+### 1. Immediate local run (no Docker)
+
+Use this when you have captured option chain snapshots on disk and want to test strategy and Gemini integrations without starting the IBKR Gateway.
+
+```bash
+python main.py --run-mode local --config config.yaml
+```
+
+Place snapshot files (e.g., `NVDA_20240101_120000.parquet`) under the `data_dir` configured in `config.yaml`. The run finishes after processing the locally stored data once.
+
+### 2. Immediate Docker-backed run
+
+Start the IBKR Gateway via Docker Compose, fetch live market data once, and exit. This mode is useful for quick validation against the live gateway without scheduling repeated scans.
+
+```bash
+python main.py --run-mode docker-immediate --config config.yaml \
+  --compose-file docker-compose.yml --docker-service ibkr-gateway \
+  --market-data DELAYED_FROZEN
+```
+
+The command automatically launches the gateway container defined in the compose file before running the scanner. Adjust `--market-data` if your IBKR account permits real-time feeds.
+
+### 3. Scheduled Docker run
+
+Run the scanner continuously on the configured schedule while managing the IBKR Gateway container lifecycle for you.
+
+```bash
+python main.py --run-mode docker-scheduled --config config.yaml
+```
+
+Scheduled run times are controlled via the `schedule` section of `config.yaml`. The process stays alive and sleeps between runs based on the configured time window.
+
+### CLI reference
+
+| Flag | Description |
+| --- | --- |
+| `--run-mode {local,docker-immediate,docker-scheduled}` | Select the execution mode. |
+| `--config PATH` | Path to the YAML configuration file (defaults to `config.yaml`). |
+| `--compose-file PATH` | Docker Compose file used to start services in Docker modes. |
+| `--docker-service NAME` | Service name for the IBKR Gateway inside the compose file. |
+| `--market-data TYPE` | IBKR market data type (`LIVE`, `FROZEN`, `DELAYED`, or `DELAYED_FROZEN`). |
+
+## Running tests
+
+The project ships with focused unit tests for AI agents, strategy logic, and Slack notifications. Execute the full suite with:
+
+```bash
+pytest
+```
+
+You can target specific modules when iterating on a component:
+
+```bash
+pytest tests/test_ai_agents.py
+pytest tests/test_strategies.py -k "VerticalSpread"
+pytest tests/test_slack_notifier.py::SlackNotifierTests::test_each_signal_sends_individual_message
+```
+
+Each test file uses built-in fixtures and mock data, so no live Gemini, Slack, or IBKR services are required.
