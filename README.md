@@ -66,7 +66,7 @@ Place snapshot files (e.g., `NVDA_20240101_120000.parquet`) under the `data_dir`
 
 ### 2. Immediate Docker-backed run
 
-Start the IBKR Gateway via Docker Compose, fetch live market data once, and exit. This mode is useful for quick validation against the live gateway without scheduling repeated scans.
+Start the IBKR Gateway via Docker Compose, fetch live market data once from the host-based scanner, and exit. This mode simply guarantees the `ib-gateway` container is running before the local process connects, which makes host and Raspberry Pi workflows identical.
 
 ```bash
 python main.py --run-mode docker-immediate --config config.yaml \
@@ -74,17 +74,17 @@ python main.py --run-mode docker-immediate --config config.yaml \
   --market-data DELAYED_FROZEN
 ```
 
-The command automatically launches the `ib-gateway` service from the compose file before running the scanner. Adjust `--market-data` if your IBKR account permits real-time feeds.
+The command automatically launches (or reuses) the `ib-gateway` service from the compose file before running the scanner on your host. Adjust `--market-data` if your IBKR account permits real-time feeds.
 
 ### 3. Scheduled Docker run
 
-Run the scanner continuously on the configured schedule while managing the IBKR Gateway container lifecycle for you.
+Run the scanner continuously on the configured schedule while keeping the `ib-gateway` container alive in the background.
 
 ```bash
 python main.py --run-mode docker-scheduled --config config.yaml
 ```
 
-Scheduled run times are controlled via the `schedule` section of `config.yaml`. The process stays alive and sleeps between runs based on the configured time window.
+Scheduled run times are controlled via the `schedule` section of `config.yaml`. The process stays alive on the host, restarts the gateway container if it fails, and sleeps between runs based on the configured window.
 
 ### CLI reference
 
