@@ -25,8 +25,7 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
                 continue
 
             underlying_price = float(snapshot.get("underlying_price", chain["underlying_price"].iloc[0]))
-            expiry_candidates = chain["expiry"].unique()
-            expiry_candidates.sort()
+            expiry_candidates = sorted(chain["expiry"].unique())
             for expiry in expiry_candidates:
                 if (expiry - datetime.utcnow()).days < self.min_days_to_expiry:
                     continue

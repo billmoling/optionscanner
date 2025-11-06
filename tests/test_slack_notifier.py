@@ -32,7 +32,7 @@ class SlackNotifierTests(unittest.TestCase):
 
         self.assertEqual(self.sent, [])
 
-    def test_payload_includes_summary_information(self):
+    def test_each_signal_sends_individual_message(self):
         notifier = SlackNotifier(
             {
                 "enabled": True,
@@ -55,18 +55,15 @@ class SlackNotifierTests(unittest.TestCase):
 
         notifier.send_signals(df, csv_path)
 
-        self.assertEqual(len(self.sent), 1)
-        url, payload = self.sent[0]
-        self.assertEqual(url, "https://hooks.test")
-        self.assertEqual(payload.get("username"), "Scanner")
-        self.assertEqual(payload.get("channel"), "#alerts")
-        text = payload["text"]
-        self.assertIn("Daily Signals", text)
-        self.assertIn("Total signals: 3", text)
-        self.assertIn("NVDA", text)
-        self.assertIn("AAPL", text)
-        self.assertIn("…and 1 more signal.", text)
-        self.assertIn("CSV saved to results/signals.csv", text)
+        self.assertEqual(len(self.sent), 3)
+        for (url, payload), symbol in zip(self.sent, ["NVDA", "AAPL", "TSLA"]):
+            self.assertEqual(url, "https://hooks.test")
+            self.assertEqual(payload.get("username"), "Scanner")
+            self.assertEqual(payload.get("channel"), "#alerts")
+            text = payload["text"]
+            self.assertIn("Daily Signals", text)
+            self.assertIn(symbol, text)
+            self.assertIn("CSV saved to results/signals.csv", text)
 
     def test_environment_variable_used_when_config_missing(self):
         os.environ["SLACK_WEBHOOK_URL"] = "https://hooks.env"

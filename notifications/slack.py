@@ -48,7 +48,7 @@ class SlackNotifier:
         self._post: PostCallable = post or self._post_to_slack
 
     def send_signals(self, df: pd.DataFrame, csv_path: Optional[Path] = None) -> None:
-        """Send the provided signals via Slack if enabled."""
+        """Send each signal as an individual Slack message when enabled."""
         if not self.enabled:
             logger.debug("Slack notifications are disabled; skipping send.")
             return
@@ -59,20 +59,25 @@ class SlackNotifier:
             logger.info("No signals to send to Slack.")
             return
 
-        payload = self._build_payload(df, csv_path)
-        try:
-            self._post(self.settings.webhook_url, payload)
-            logger.info(
-                "Sent Slack notification with {count} signals to {channel}",
-                count=len(df),
-                channel=self.settings.channel or "configured webhook",
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception("Failed to send Slack notification: {error}", error=exc)
+        for _, row in df.iterrows():
+            message = self._build_signal_message(row, csv_path)
+            payload = self._build_payload(message)
+            try:
+                self._post(self.settings.webhook_url, payload)
+                logger.info(
+                    "Sent Slack notification for symbol={symbol} strategy={strategy}",
+                    symbol=row.get("symbol"),
+                    strategy=row.get("strategy"),
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception(
+                    "Failed to send Slack notification | symbol={symbol} error={error}",
+                    symbol=row.get("symbol"),
+                    error=exc,
+                )
 
-    def _build_payload(self, df: pd.DataFrame, csv_path: Optional[Path]) -> Dict[str, object]:
-        text = self._build_message(df, csv_path)
-        payload: Dict[str, object] = {"text": text}
+    def _build_payload(self, message: str) -> Dict[str, object]:
+        payload: Dict[str, object] = {"text": message}
         if self.settings.username:
             payload["username"] = self.settings.username
         if self.settings.channel:
@@ -81,23 +86,30 @@ class SlackNotifier:
             payload["icon_emoji"] = self.settings.icon_emoji
         return payload
 
-    def _build_message(self, df: pd.DataFrame, csv_path: Optional[Path]) -> str:
-        lines: List[str] = [self.title, f"Total signals: {len(df)}"]
-        display_df = df.head(self.max_rows)
-        summary_columns = [
-            col
-            for col in ["symbol", "strategy", "action", "confidence"]
-            if col in display_df.columns
-        ]
-        if summary_columns:
+    def _build_signal_message(self, row: pd.Series, csv_path: Optional[Path]) -> str:
+        lines: List[str] = [self.title]
+        summary_fields = {
+            "Symbol": row.get("symbol"),
+            "Strategy": row.get("strategy"),
+            "Action": row.get("action") or row.get("direction"),
+            "Option": f"{row.get('option_type')} {row.get('strike')} exp {row.get('expiry')}".strip(),
+            "Confidence": row.get("confidence"),
+        }
+        for label, value in summary_fields.items():
+            if value not in (None, ""):
+                lines.append(f"{label}: {value}")
+        explanation = row.get("explanation")
+        if explanation:
             lines.append("")
-            for _, row in display_df.iterrows():
-                parts = [str(row.get(col, "")) for col in summary_columns]
-                lines.append("• " + " - ".join(part for part in parts if part))
-        if len(df) > len(display_df):
-            remaining = len(df) - len(display_df)
-            lines.append(f"…and {remaining} more signal{'s' if remaining != 1 else ''}.")
+            lines.append("Explanation:")
+            lines.append(str(explanation))
+        validation = row.get("validation")
+        if validation:
+            lines.append("")
+            lines.append("Validation:")
+            lines.append(str(validation))
         if csv_path:
+            lines.append("")
             lines.append(f"CSV saved to {csv_path}")
         return "\n".join(lines)
 
