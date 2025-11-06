@@ -22,7 +22,7 @@ MARKET_DATA_CODE_TO_NAME = {code: name for name, code in MARKET_DATA_TYPE_CODES.
 
 OPTION_EXCHANGE_OVERRIDES: Dict[str, str] = {
     # Hard-coded exchange preferences for frequently scanned symbols.
-    "NVDA": "NASDAQ",
+    "NVDA": "SMART",
     "AAPL": "CBOE",
     "TSLA": "CBOE",
     "META": "CBOE",
@@ -198,22 +198,21 @@ class IBKRDataFetcher(BaseDataFetcher):
         chain_exchange = chain.exchange or ""
         target_exchange = override_exchange or chain_exchange or "CBOE"
         trading_class = getattr(chain, "tradingClass", "") or ""
-        preferred_exchange_set = {
-            exchange
-            for exchange in (
-                override_exchange,
-                chain_exchange,
-                target_exchange,
-                "CBOE",
-                "NASDAQOM",
-                "BOX",
-                "BATSOP",
-                "SMART",
-                "ARCA",
-            )
-            if exchange
-        }
-        preferred_exchanges = list(preferred_exchange_set)
+        candidate_exchanges = [
+            override_exchange,
+            chain_exchange,
+            target_exchange,
+            "SMART",
+            "CBOE",
+            "BOX",
+            "NASDAQOM",
+            "ARCA",
+            "BATSOP",
+        ]
+        preferred_exchanges: List[str] = []
+        for exchange in candidate_exchanges:
+            if exchange and exchange not in preferred_exchanges:
+                preferred_exchanges.append(exchange)
         target_expiries = sorted(chain.expirations)[: self._max_expiries]
         selected_contracts: Dict[int, Option] = {}
 
