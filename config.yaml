@@ -17,7 +17,7 @@ schedule:
   timezone: "America/Los_Angeles"
 slack:
   enabled: false
-  webhook_url: "https://hooks.slack.com/services/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"
+  webhook_url: "https://hooks.slack.com/services/XXX/YY/ZZ"
   username: "Option Scanner"
   channel: "#option-scanner-test"
   icon_emoji: ":chart_with_upwards_trend:"
