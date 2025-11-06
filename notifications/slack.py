@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import pandas as pd
+import yaml
 from loguru import logger
 
 
@@ -34,8 +36,9 @@ class SlackNotifier:
         self.enabled: bool = bool(config.get("enabled", False))
         self.title: str = config.get("title", "Option Scanner Signals")
         self.max_rows: int = int(config.get("max_rows", 10))
+        webhook_url = self._resolve_webhook_url(config)
         settings = SlackSettings(
-            webhook_url=config.get("webhook_url", ""),
+            webhook_url=webhook_url,
             username=config.get("username"),
             channel=config.get("channel"),
             icon_emoji=config.get("icon_emoji"),
@@ -108,3 +111,61 @@ class SlackNotifier:
                     raise RuntimeError(f"Slack webhook responded with status {status}")
         except (HTTPError, URLError) as exc:
             raise RuntimeError("Slack webhook request failed") from exc
+
+    def _resolve_webhook_url(self, config: Dict[str, object]) -> str:
+        configured = str(config.get("webhook_url", "") or "").strip()
+        if configured:
+            return configured
+
+        env_value = os.getenv("SLACK_WEBHOOK_URL", "").strip()
+        if env_value:
+            return env_value
+
+        secret_value = self._load_webhook_from_secrets()
+        if secret_value:
+            return secret_value
+
+        return ""
+
+    def _load_webhook_from_secrets(self) -> str:
+        candidates: Iterable[Path] = (
+            Path("config/secrets.yaml"),
+            Path("secrets.yaml"),
+            Path(".secrets.yaml"),
+        )
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                with path.open("r", encoding="utf-8") as fh:
+                    data = yaml.safe_load(fh) or {}
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning(
+                    "Unable to read Slack webhook secret file | path={path} reason={error}",
+                    path=str(path),
+                    error=exc,
+                )
+                continue
+            webhook_url = self._extract_webhook_from_data(data)
+            if webhook_url:
+                return webhook_url
+        return ""
+
+    def _extract_webhook_from_data(self, data: object) -> str:
+        if not isinstance(data, dict):
+            return ""
+
+        # Common layouts: top-level key or nested under "slack"/"notifications"
+        direct = data.get("slack_webhook_url")
+        if isinstance(direct, str) and direct.strip():
+            return direct.strip()
+
+        for key in ("slack", "notifications"):
+            section = data.get(key)
+            if not isinstance(section, dict):
+                continue
+            value = section.get("webhook_url") or section.get("slack_webhook_url")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        return ""

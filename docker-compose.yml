@@ -31,5 +31,7 @@ services:
       - ibkr-gateway
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:?Set SLACK_WEBHOOK_URL in your .env file}
     networks:
       - ibkr-net

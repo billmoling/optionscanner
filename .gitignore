@@ -38,6 +38,7 @@ Thumbs.db
 secrets.yaml
 .secrets.yaml
 config/secrets.yaml
+.env
 
 # === NautilusTrader specific (local storage, cache) ===
 nautilus_trader_data/
