@@ -6,7 +6,7 @@ from ai_agents import (
     SignalExplainAgent,
     SignalValidationAgent,
 )
-from main import OptionChainSnapshot
+from option_data import OptionChainSnapshot
 from strategies.base import TradeSignal
 
 

@@ -6,20 +6,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
 from textwrap import dedent
-from typing import Iterable, List, Optional, Sequence, TYPE_CHECKING
+from typing import Iterable, List, Optional, Sequence
 
 from loguru import logger
 import yaml
 
 from strategies.base import TradeSignal
+from option_data import OptionChainSnapshot
 
 try:  # pragma: no cover - optional dependency resolved at runtime
     import google.generativeai as genai
 except ImportError:  # pragma: no cover - handled gracefully in GeminiClient
     genai = None  # type: ignore[assignment]
-
-if TYPE_CHECKING:  # pragma: no cover - imported for type checking only
-    from main import OptionChainSnapshot
 
 
 class GeminiClientError(RuntimeError):
@@ -452,4 +450,3 @@ class SignalValidationAgent:
 
 
 __all__ = ["SignalExplainAgent", "SignalValidationAgent", "GeminiClient", "GeminiClientError"]
-

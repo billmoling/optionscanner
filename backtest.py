@@ -12,7 +12,7 @@ import pandas as pd
 
 from loguru import logger
 
-from main import OptionChainSnapshot
+from option_data import OptionChainSnapshot
 from strategies.base import BaseOptionStrategy
 
 

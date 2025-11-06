@@ -2,17 +2,11 @@ ibkr:
   host: "ibkr-gateway"
   port: 4002
   client_id: 1
+  local_host: "127.0.0.1"
+  local_port: 4002
+  local_client_id: 1
 tickers:
   - NVDA
-  - AAPL
-  - TSLA
-  - META
-  - AMZN
-  - MSFT
-  - GOOG
-  - NFLX
-  - AMD
-  - JPM
 log_dir: "./logs"
 data_dir: "./data"
 schedule:
@@ -23,9 +17,9 @@ schedule:
   timezone: "America/Los_Angeles"
 slack:
   enabled: false
-  webhook_url: "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+  webhook_url: "https://hooks.slack.com/services/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"
   username: "Option Scanner"
-  channel: "#trading-alerts"
+  channel: "#option-scanner-test"
   icon_emoji: ":chart_with_upwards_trend:"
   title: "Daily Option Scanner Signals"
   max_rows: 10
