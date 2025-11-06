@@ -25,7 +25,7 @@ The repository ships with a `docker-compose.yml` file that starts both the IBKR 
    mkdir -p gateway/config gateway/logs
    ```
 
-   The compose file mounts these folders at `/home/ibkr/.ibgateway` and `/home/ibkr/logs`, respectively.
+   The compose file mounts these folders at `/home/ibkr/.ibgateway` and `/home/ibkr/logs`, respectively. They are excluded from version control via `gateway/.gitignore` so they can safely hold runtime data.
 
 3. **Review application configuration.**
    The default `config.yaml` now targets the gateway container hostname:
@@ -44,12 +44,15 @@ The repository ships with a `docker-compose.yml` file that starts both the IBKR 
    docker compose up --build
    ```
 
-   Docker Compose creates a user-defined bridge network named `ibkr-net` so the scanner can reach the gateway at `ibkr-gateway:4002`. Logs from both containers appear in the same terminal. Use `Ctrl+C` to stop the stack.
+   Docker Compose creates a user-defined bridge network named `ibkr-net` so the scanner can reach the gateway at `ibkr-gateway:4002`. Gateway ports `4001`/`4002` are published to the host for API access, and `5900` exposes the VNC session required to complete IBKR logins and 2FA from a VNC client. Logs from both containers appear in the same terminal. Use `Ctrl+C` to stop the stack.
 
-5. **Run in the background (optional).**
+5. **Complete the IBKR login.**
+   Connect a VNC client to `localhost:5900` (password is provided by the gateway image documentation) to approve the interactive login or supply 2FA codes when prompted. The session only needs to remain open long enough for the gateway to finish initialization.
+
+6. **Run in the background (optional).**
    To run detached, use `docker compose up --build -d`. Tail the combined logs with `docker compose logs -f`.
 
-6. **Clean up.**
+7. **Clean up.**
    Stop the services and remove the containers with `docker compose down`. Persistent gateway data remains inside the `gateway/` directory.
 
 ## Local development

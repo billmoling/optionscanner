@@ -8,6 +8,10 @@ services:
   ibkr-gateway:
     image: ghcr.io/ibkrcampus/ibkr-gateway:stable
     restart: unless-stopped
+    ports:
+      - "4002:4002" # IB Gateway API (paper trading)
+      - "4001:4001" # IB Gateway API (live trading)
+      - "5900:5900" # VNC for interactive login/2FA
     environment:
       TWS_USERID: ${TWS_USERID:?Set TWS_USERID to your IBKR username}
       TWS_PASSWORD: ${TWS_PASSWORD:?Set TWS_PASSWORD to your IBKR password}
