@@ -13,6 +13,19 @@ tickers:
   - NFLX
   - AMD
   - JPM
-update_interval_minutes: 5
 log_dir: "./logs"
 data_dir: "./data"
+schedule:
+  times:
+    - "06:30"
+    - "10:00"
+    - "12:15"
+  timezone: "America/Los_Angeles"
+slack:
+  enabled: false
+  webhook_url: "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+  username: "Option Scanner"
+  channel: "#trading-alerts"
+  icon_emoji: ":chart_with_upwards_trend:"
+  title: "Daily Option Scanner Signals"
+  max_rows: 10
