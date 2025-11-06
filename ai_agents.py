@@ -30,7 +30,7 @@ class GeminiClientError(RuntimeError):
 class GeminiClient:
     """Lightweight wrapper for Google Gemini text generation."""
 
-    model_name: str = "gemini-1.5-flash"
+    model_name: str = "gemini-2.5-flash"
     api_key_env_vars: Sequence[str] = ("GOOGLE_API_KEY", "GEMINI_API_KEY")
     config_path_env_var: str = "GEMINI_CONFIG_PATH"
     config_file_candidates: Sequence[str] = (
