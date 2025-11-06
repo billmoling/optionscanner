@@ -120,3 +120,14 @@ pytest tests/test_slack_notifier.py::SlackNotifierTests::test_each_signal_sends_
 ```
 
 Each test file uses built-in fixtures and mock data, so no live Gemini, Slack, or IBKR services are required.
+
+### Slack integration test
+
+If you want to verify end-to-end Slack delivery, an optional integration test is available. The test loads `.env` automatically and posts a single message through your real webhook when `SLACK_WEBHOOK_URL` is defined. To run it:
+
+```bash
+# Ensure .env contains SLACK_WEBHOOK_URL=<your-webhook> (and optionally SLACK_TEST_CHANNEL)
+python -m unittest tests.test_slack_notifier_integration
+```
+
+Set `SLACK_TEST_CHANNEL` in `.env` if you need to override the default channel for integration runs. The test is skipped automatically when no webhook is configured.
