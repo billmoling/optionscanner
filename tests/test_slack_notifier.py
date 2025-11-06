@@ -1,3 +1,4 @@
+import os
 import unittest
 from pathlib import Path
 
@@ -66,6 +67,38 @@ class SlackNotifierTests(unittest.TestCase):
         self.assertIn("AAPL", text)
         self.assertIn("…and 1 more signal.", text)
         self.assertIn("CSV saved to results/signals.csv", text)
+
+    def test_environment_variable_used_when_config_missing(self):
+        os.environ["SLACK_WEBHOOK_URL"] = "https://hooks.env"
+        self.addCleanup(lambda: os.environ.pop("SLACK_WEBHOOK_URL", None))
+
+        notifier = SlackNotifier({"enabled": True}, post=self.fake_post)
+        df = pd.DataFrame([{"symbol": "NVDA"}])
+
+        notifier.send_signals(df)
+
+        self.assertEqual(len(self.sent), 1)
+        url, _payload = self.sent[0]
+        self.assertEqual(url, "https://hooks.env")
+
+    def test_secrets_file_used_when_config_and_env_missing(self):
+        # Ensure env var is absent
+        os.environ.pop("SLACK_WEBHOOK_URL", None)
+
+        temp_dir = Path("config")
+        temp_dir.mkdir(exist_ok=True)
+        secret_path = temp_dir / "secrets.yaml"
+        secret_path.write_text("slack:\n  webhook_url: https://hooks.secret\n", encoding="utf-8")
+        self.addCleanup(lambda: secret_path.unlink(missing_ok=True))
+
+        notifier = SlackNotifier({"enabled": True}, post=self.fake_post)
+        df = pd.DataFrame([{"symbol": "NVDA"}])
+
+        notifier.send_signals(df)
+
+        self.assertEqual(len(self.sent), 1)
+        url, _payload = self.sent[0]
+        self.assertEqual(url, "https://hooks.secret")
 
 
 if __name__ == "__main__":
