@@ -20,7 +20,7 @@ from loguru import logger
 from logging_utils import configure_logging
 from strategies.base import BaseOptionStrategy, TradeSignal
 from ai_agents import SignalExplainAgent, SignalValidationAgent
-from notifications import EmailNotifier
+from notifications import SlackNotifier
 
 
 MARKET_DATA_TYPE_CODES = {
@@ -219,7 +219,7 @@ async def run_once(
     strategies: List[BaseOptionStrategy],
     symbols: Iterable[str],
     results_dir: Path,
-    email_notifier: Optional[EmailNotifier] = None,
+    slack_notifier: Optional[SlackNotifier] = None,
 ) -> None:
     snapshots = await fetcher.fetch_all(symbols)
     aggregated_signals: List[TradeSignal] = []
@@ -255,9 +255,9 @@ async def run_once(
     df.to_csv(file_path, index=False)
     logger.info("Saved {count} signals to {path}", count=len(df), path=str(file_path))
 
-    if email_notifier:
+    if slack_notifier:
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, email_notifier.send_signals, df, file_path)
+        await loop.run_in_executor(None, slack_notifier.send_signals, df, file_path)
 
 
 async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
@@ -274,7 +274,7 @@ async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
     strategies = discover_strategies()
     symbols = config.get("tickers", [])
     results_dir = Path("./results")
-    email_notifier = EmailNotifier(config.get("email"))
+    slack_notifier = SlackNotifier(config.get("slack"))
 
     schedule_config = config.get("schedule", {})
     schedule_time_str = str(schedule_config.get("time", "07:00"))
@@ -318,7 +318,13 @@ async def run_scheduler(config: Dict[str, Any], market_data_type: str) -> None:
         start = datetime.now(tz)
         logger.info("Starting scheduled run at {start}", start=start.isoformat())
         try:
-            await run_once(fetcher, strategies, symbols, results_dir, email_notifier=email_notifier)
+            await run_once(
+                fetcher,
+                strategies,
+                symbols,
+                results_dir,
+                slack_notifier=slack_notifier,
+            )
         except Exception as exc:
             logger.exception("Run failed: {error}", error=exc)
         duration = (datetime.now(tz) - start).total_seconds()

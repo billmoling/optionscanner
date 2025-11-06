@@ -1,5 +1,5 @@
 """Notification utilities for the option scanner."""
 
-from .emailer import EmailNotifier
+from .slack import SlackNotifier
 
-__all__ = ["EmailNotifier"]
+__all__ = ["SlackNotifier"]

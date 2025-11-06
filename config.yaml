@@ -18,16 +18,11 @@ data_dir: "./data"
 schedule:
   time: "07:00"
   timezone: "America/Los_Angeles"
-email:
+slack:
   enabled: false
-  sender: "scanner@example.com"
-  recipients:
-    - "trader@example.com"
-  subject: "Daily Option Scanner Signals"
-  smtp:
-    host: "smtp.example.com"
-    port: 465
-    use_ssl: true
-    use_tls: false
-    username: "user"
-    password: "pass"
+  webhook_url: "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+  username: "Option Scanner"
+  channel: "#trading-alerts"
+  icon_emoji: ":chart_with_upwards_trend:"
+  title: "Daily Option Scanner Signals"
+  max_rows: 10
