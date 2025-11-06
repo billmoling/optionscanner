@@ -82,7 +82,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--docker-service",
-        default="ibkr-gateway",
+        default="ib-gateway",
         help="Name of the docker-compose service that hosts the IBKR gateway.",
     )
     parser.add_argument(
@@ -107,19 +107,18 @@ def main(argv: Optional[List[str]] = None) -> None:
     run_mode = RunMode(args.run_mode)
     data_dir = Path(config.get("data_dir", "./data"))
     ibkr_settings = config.get("ibkr") or {}
-    default_host = ibkr_settings.get("host")
-    default_port = ibkr_settings.get("port")
-    default_client_id = ibkr_settings.get("client_id", 1)
+    host = ibkr_settings.get("host", "127.0.0.1")
+    port = ibkr_settings.get("port")
+    client_id = ibkr_settings.get("client_id", 1)
+
 
     explain_agent = SignalExplainAgent()
     validation_agent = SignalValidationAgent()
 
+    if port is None:
+        raise ValueError("IBKR port is not configured. Set 'ibkr.port' in the configuration.")
+
     if run_mode is RunMode.LOCAL_IMMEDIATE:
-        host = ibkr_settings.get("local_host", default_host or "127.0.0.1")
-        port = ibkr_settings.get("local_port", default_port)
-        client_id = ibkr_settings.get("local_client_id", default_client_id)
-        if port is None:
-            raise ValueError("IBKR port is not configured for local run (expected 'ibkr.port' or 'ibkr.local_port').")
         fetcher = IBKRDataFetcher(
             host=host,
             port=int(port),
@@ -143,11 +142,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             logger.info("Shutdown requested by user")
         return
 
-    if default_host is None or default_port is None:
-        raise ValueError(
-            "IBKR connection details are incomplete. Set 'ibkr.host' and 'ibkr.port' in the configuration."
-        )
-
+    
     docker_controller = DockerController(Path(args.compose_file))
     try:
         docker_controller.start_service(args.docker_service)
@@ -156,9 +151,9 @@ def main(argv: Optional[List[str]] = None) -> None:
         raise SystemExit(1) from exc
 
     fetcher = IBKRDataFetcher(
-        host=default_host,
-        port=int(default_port),
-        client_id=int(default_client_id),
+        host=host,
+        port=int(port),
+        client_id=int(client_id),
         data_dir=data_dir,
         market_data_type=args.market_data,
     )

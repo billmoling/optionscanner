@@ -2,58 +2,51 @@
 
 Optionscanner is a lightweight toolkit for monitoring option chains and portfolio exposure using the Interactive Brokers (IBKR) API.
 
-## Docker usage
+## IBKR gateway via Docker
 
-The repository ships with a `docker-compose.yml` file that starts both the IBKR Gateway and the scanner in a shared network. Follow the steps below to bring the stack online:
+The `docker-compose.yml` file now focuses solely on the IBKR Gateway container. Run the gateway in Docker, keep the scanner on the host (or Raspberry Pi), and connect over the published ports. This mirrors the production deployment while keeping local development simple.
 
-1. **Create credentials file (optional but recommended).**
-   Create a `.env` file in the project root so Docker Compose can read your credentials and gateway preferences. At minimum, populate the following values:
+1. **Populate `.env`.**  
+   Docker Compose reads your credentials and runtime preferences from `.env`. Set at least:
 
    ```dotenv
    TWS_USERID=your-ibkr-username
    TWS_PASSWORD=your-ibkr-password
    IAPI_CLIENT_ID=1
-   TRADING_MODE=paper
+   TRADING_MODE=paper   # use "live" only when you intend to trade live
    ```
 
-   The variables are forwarded directly to the `ghcr.io/ibkrcampus/ibkr-gateway` image. Refer to the image documentation for the full list of supported options (for example, 2FA timeout or region-specific settings).
+   Every variable in `.env` is forwarded to `ghcr.io/gnzsnz/ib-gateway:stable`, so you can opt into advanced behaviors (auto restarts, read-only API, etc.) without editing the compose file.
 
-2. **Prepare persistent storage for the gateway.**
-   Create directories that will be mounted into the gateway container so that session settings and logs survive container restarts:
+2. **Start or rebuild the gateway container.**
 
-   ```bash
-   mkdir -p gateway/config gateway/logs
-   ```
+```bash
+docker compose up -d ib-gateway
+```
 
-   The compose file mounts these folders at `/home/ibkr/.ibgateway` and `/home/ibkr/logs`, respectively. They are excluded from version control via `gateway/.gitignore` so they can safely hold runtime data.
+   The service publishes `127.0.0.1:4002` → container `4004` (paper trading API), `127.0.0.1:4001` → `4003` (live trading API), and `127.0.0.1:5900` for VNC/2FA.
 
-3. **Review application configuration.**
-   The default `config.yaml` now targets the gateway container hostname:
+3. **Complete the interactive login.**  
+   Attach a VNC client to `localhost:5900` and follow the prompts (password is documented in the upstream image). After IBKR finishes loading, you can close VNC; the container keeps running and reconnects on failure according to the environment settings.
+
+4. **Point the scanner at the container.**  
+   The default `config.yaml` already targets the host loopback:
 
    ```yaml
    ibkr:
-     host: "ibkr-gateway"
+     host: "127.0.0.1"
+     port: 4002      # pair with TRADING_MODE=paper; switch to 4001 for live
    ```
 
-   If you run the scanner outside of Docker or connect to a remote gateway, update `ibkr.host` to the appropriate hostname or IP address.
+   When running on another machine (e.g., Raspberry Pi), set `ibkr.host` to the Docker host’s IP address or SSH tunnel endpoint.
 
-4. **Start the stack.**
-   Build and launch both services in the foreground:
+5. **Stop the gateway when finished.**
 
    ```bash
-   docker compose up --build
+   docker compose down
    ```
 
-   Docker Compose creates a user-defined bridge network named `ibkr-net` so the scanner can reach the gateway at `ibkr-gateway:4002`. Gateway ports `4001`/`4002` are published to the host for API access, and `5900` exposes the VNC session required to complete IBKR logins and 2FA from a VNC client. Logs from both containers appear in the same terminal. Use `Ctrl+C` to stop the stack.
-
-5. **Complete the IBKR login.**
-   Connect a VNC client to `localhost:5900` (password is provided by the gateway image documentation) to approve the interactive login or supply 2FA codes when prompted. The session only needs to remain open long enough for the gateway to finish initialization.
-
-6. **Run in the background (optional).**
-   To run detached, use `docker compose up --build -d`. Tail the combined logs with `docker compose logs -f`.
-
-7. **Clean up.**
-   Stop the services and remove the containers with `docker compose down`. Persistent gateway data remains inside the `gateway/` directory.
+   (Use `docker compose logs -f ib-gateway` to monitor gateway output while it runs.)
 
 ## Running the scanner
 
@@ -77,11 +70,11 @@ Start the IBKR Gateway via Docker Compose, fetch live market data once, and exit
 
 ```bash
 python main.py --run-mode docker-immediate --config config.yaml \
-  --compose-file docker-compose.yml --docker-service ibkr-gateway \
+  --compose-file docker-compose.yml --docker-service ib-gateway \
   --market-data DELAYED_FROZEN
 ```
 
-The command automatically launches the gateway container defined in the compose file before running the scanner. Adjust `--market-data` if your IBKR account permits real-time feeds.
+The command automatically launches the `ib-gateway` service from the compose file before running the scanner. Adjust `--market-data` if your IBKR account permits real-time feeds.
 
 ### 3. Scheduled Docker run
 
@@ -119,7 +112,7 @@ pytest tests/test_strategies.py -k "VerticalSpread"
 pytest tests/test_slack_notifier.py::SlackNotifierTests::test_each_signal_sends_individual_message
 ```
 
-Each test file uses built-in fixtures and mock data, so no live Gemini, Slack, or IBKR services are required.
+Unit tests rely on built-in fixtures and mock data, so no live Gemini, Slack, or IBKR services are required. The optional integration tests below exercise the real services.
 
 ### Slack integration test
 
@@ -141,3 +134,13 @@ python -m unittest tests.test_ai_agents_integration
 ```
 
 The test uses your live Gemini access to generate an explanation for a sample trade signal and prints the response to the console. It is skipped automatically when the API key or `google-generativeai` package is missing.
+
+### IBKR integration test
+
+Start the IBKR Gateway via Docker Compose (for example, `docker compose up -d ib-gateway`) or connect to an existing gateway, ensure `.env` contains `TWS_USERID`, `TWS_PASSWORD`, `IAPI_CLIENT_ID`, and `TRADING_MODE`, then run:
+
+```bash
+python -m unittest tests.test_ibkr_integration
+```
+
+The test connects to the gateway, requests the delayed NVDA stock price, and prints the captured quote. Override the default connection settings with `IBKR_HOST`, `IBKR_PORT`, or `IBKR_MARKET_DATA_TYPE` if needed. The port automatically follows `TRADING_MODE` (`4002` for paper, `4001` for live) unless `IBKR_PORT` is provided.
