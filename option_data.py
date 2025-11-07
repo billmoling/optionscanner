@@ -178,6 +178,11 @@ class IBKRDataFetcher(BaseDataFetcher):
         if self._ib.isConnected():
             self._ib.disconnect()
 
+    @property
+    def ib(self) -> IB:
+        """Return the underlying ib_insync client instance."""
+        return self._ib
+
     async def fetch_option_chain(self, symbol: str) -> OptionChainSnapshot:
         await self.connect()
         contract = Stock(symbol, "SMART", "USD")

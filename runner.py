@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 from loguru import logger
@@ -76,6 +76,8 @@ async def run_scheduler(
     symbols: Sequence[str],
     results_dir: Path,
     slack_notifier: Optional[SlackNotifier],
+    *,
+    post_run: Optional[Callable[[], None]] = None,
 ) -> None:
     schedule_config = config.get("schedule", {})
     scheduled_times = parse_schedule_times(schedule_config)
@@ -118,6 +120,11 @@ async def run_scheduler(
                 validation_agent=validation_agent,
                 slack_notifier=slack_notifier,
             )
+            if post_run is not None:
+                try:
+                    post_run()
+                except Exception:
+                    logger.exception("Post-run callback failed")
         except Exception:
             logger.exception("Run failed")
         duration = (datetime.now(tz) - start).total_seconds()
