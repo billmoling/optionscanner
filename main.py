@@ -17,6 +17,7 @@ from docker_utils import DockerController, DockerControllerError
 from logging_utils import configure_logging
 from notifications import SlackNotifier
 from option_data import IBKRDataFetcher, MARKET_DATA_TYPE_CODES
+from portfolio.manager import PortfolioManager
 from runner import run_once, run_scheduler
 from strategies.base import BaseOptionStrategy
 
@@ -94,6 +95,30 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def execute_portfolio_manager(
+    fetcher: IBKRDataFetcher,
+    portfolio_config: Dict[str, Any],
+) -> None:
+    """Run the portfolio manager workflow with the provided fetcher."""
+    try:
+        slack_config = portfolio_config.get("slack") or portfolio_config.get("notifications")
+        enable_gemini = bool(portfolio_config.get("enable_gemini", True))
+        manager = PortfolioManager(
+            fetcher.ib,
+            config_path=portfolio_config.get("config_path", "risk.yaml"),
+            slack_config=slack_config,
+            enable_gemini=enable_gemini,
+        )
+        manager.load_positions()
+        manager.compute_greeks()
+        manager.evaluate_rules()
+        manager.generate_actions()
+        message = manager.notify()
+        logger.info("Portfolio manager summary:\n{message}", message=message)
+    except Exception:
+        logger.exception("Portfolio manager execution failed")
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     args = parse_args(argv)
     config = load_config(args.config)
@@ -107,6 +132,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     run_mode = RunMode(args.run_mode)
     data_dir = Path(config.get("data_dir", "./data"))
     ibkr_settings = config.get("ibkr") or {}
+    portfolio_settings = dict(config.get("portfolio", {}))
+    if "slack" not in portfolio_settings and config.get("slack"):
+        portfolio_settings["slack"] = config.get("slack")
     host = ibkr_settings.get("host", "127.0.0.1")
     port = ibkr_settings.get("port")
     client_id = ibkr_settings.get("client_id", 1)
@@ -138,6 +166,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     slack_notifier=slack_notifier,
                 )
             )
+            execute_portfolio_manager(fetcher, portfolio_settings)
         except KeyboardInterrupt:
             logger.info("Shutdown requested by user")
         return
@@ -171,6 +200,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     slack_notifier=slack_notifier,
                 )
             )
+            execute_portfolio_manager(fetcher, portfolio_settings)
         else:
             asyncio.run(
                 run_scheduler(
@@ -180,6 +210,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     symbols,
                     results_dir,
                     slack_notifier,
+                    post_run=lambda: execute_portfolio_manager(fetcher, portfolio_settings),
                 )
             )
     except KeyboardInterrupt:
