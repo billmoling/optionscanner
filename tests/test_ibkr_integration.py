@@ -1,11 +1,11 @@
-import asyncio
 import math
 import os
+import time
 import unittest
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
-from ib_insync import IB, Stock
+from ib_async import IB, Stock
 
 from option_data import MARKET_DATA_TYPE_CODES
 
@@ -45,36 +45,30 @@ class IBKRDelayedDataIntegrationTest(unittest.TestCase):
         client_id = int(os.getenv("IAPI_CLIENT_ID", "1"))
         market_data_type = os.getenv("IBKR_MARKET_DATA_TYPE", "DELAYED").upper()
 
-        async def _fetch_price() -> tuple[float, datetime]:
-            ib = IB()
-            try:
-                await ib.connectAsync(host, port, clientId=client_id, timeout=5)
-                market_code = MARKET_DATA_TYPE_CODES.get(
-                    market_data_type, MARKET_DATA_TYPE_CODES["DELAYED"]
-                )
-                ib.reqMarketDataType(market_code)
-                contract = Stock("NVDA", "NASDAQ", "USD")
-                await ib.qualifyContractsAsync(contract)
-                if hasattr(ib, "reqMktDataAsync"):
-                    ticker = await ib.reqMktDataAsync(contract, "", False, False)
-                else:
-                    ticker = ib.reqMktData(contract, "", False, False)
+        ib = IB()
+        try:
+            ib.connect(host, port, clientId=client_id, timeout=5)
+            market_code = MARKET_DATA_TYPE_CODES.get(
+                market_data_type, MARKET_DATA_TYPE_CODES["DELAYED"]
+            )
+            ib.reqMarketDataType(market_code)
+            contract = Stock("NVDA", "NASDAQ", "USD")
+            ib.qualifyContracts(contract)
+            ticker = ib.reqMktData(contract, "", False, False)
 
-                price = float("nan")
-                for _ in range(20):
-                    candidate = float(ticker.last or ticker.close or ticker.marketPrice() or 0.0)
-                    if math.isfinite(candidate) and candidate > 0.0:
-                        price = candidate
-                        break
-                    await asyncio.sleep(0.25)
+            price = float("nan")
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                candidate = float(ticker.last or ticker.close or ticker.marketPrice() or 0.0)
+                if math.isfinite(candidate) and candidate > 0.0:
+                    price = candidate
+                    break
+                ib.sleep(0.25)
 
-                timestamp = getattr(ticker, "time", None) or datetime.now(timezone.utc)
-                return price, timestamp
-            finally:
-                if ib.isConnected():
-                    ib.disconnect()
-
-        price, timestamp = asyncio.run(_fetch_price())
+            timestamp = getattr(ticker, "time", None) or datetime.now(timezone.utc)
+        finally:
+            if ib.isConnected():
+                ib.disconnect()
 
         self.assertGreater(price, 0.0, "Expected NVDA delayed price to be positive.")
         print(

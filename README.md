@@ -144,3 +144,11 @@ python -m unittest tests.test_ibkr_integration
 ```
 
 The test connects to the gateway, requests the delayed NVDA stock price, and prints the captured quote. Override the default connection settings with `IBKR_HOST`, `IBKR_PORT`, or `IBKR_MARKET_DATA_TYPE` if needed. The port automatically follows `TRADING_MODE` (`4002` for paper, `4001` for live) unless `IBKR_PORT` is provided.
+
+If you also want to confirm option-chain access end-to-end, run:
+
+```bash
+python -m unittest tests.test_ibkr_options_integration
+```
+
+The option-chain test connects to the same gateway, resolves the next NVDA expiration, and fetches a single near-the-money call quote. It uses the identical `.env` configuration and skips automatically when the gateway credentials are absent.
