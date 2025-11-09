@@ -53,7 +53,7 @@ class IBKRMarketDataIntegrationTest(unittest.TestCase):
             ib.reqMarketDataType(MARKET_DATA_TYPE_CODES[market_data_type])
             contract = Stock("NVDA", "NASDAQ", "USD")
             ib.qualifyContracts(contract)
-            ticker = ib.reqMktData(contract, "", False, False)
+            ticker = ib.reqMktData(contract, "", True, False)
 
             price = float("nan")
             deadline = time.monotonic() + 5.0

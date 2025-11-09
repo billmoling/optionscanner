@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 import yaml
-from ib_insync import IB
+from ib_async import IB
 from loguru import logger
 
 from .greeks import GreekCalculator, GreekSummary, compute_concentration

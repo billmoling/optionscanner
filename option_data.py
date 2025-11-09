@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
-from ib_insync import Contract, IB, Option, Stock
+from ib_async import Contract, IB, Option, Stock
 from loguru import logger
+from zoneinfo import ZoneInfo
 
 
 MARKET_DATA_TYPE_CODES = {
@@ -61,7 +62,7 @@ class BaseDataFetcher:
 
 
 class IBKRDataFetcher(BaseDataFetcher):
-    """Handles IBKR data retrieval using ib_insync with Nautilus compatibility."""
+    """Handles IBKR data retrieval using ib_async with Nautilus compatibility."""
 
     def __init__(
         self,
@@ -83,6 +84,9 @@ class IBKRDataFetcher(BaseDataFetcher):
             )
         self._market_data_type_code = MARKET_DATA_TYPE_CODES[self.market_data_type]
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.history_dir = Path("historydata")
+        self.history_dir.mkdir(parents=True, exist_ok=True)
+        self._history_timezone = ZoneInfo("America/Los_Angeles")
         self._ib = IB()
         self._lock = asyncio.Lock()
         self._max_expiries = 4
@@ -115,7 +119,7 @@ class IBKRDataFetcher(BaseDataFetcher):
             else:
                 tickers = self._ib.reqTickers(*contracts)
             return list(tickers)
-        except Exception as exc:  # ib_insync raises IBError; fallback to generic for compatibility
+        except Exception as exc:  # ib_async raises IBError; fallback to generic for compatibility
             error_code = getattr(exc, "errorCode", None)
             if error_code == 354:
                 raise RuntimeError(
@@ -133,7 +137,7 @@ class IBKRDataFetcher(BaseDataFetcher):
         if hasattr(self._ib, "reqMktDataAsync"):
             try:
                 self._set_market_data_type(self._market_data_type_code)
-                return await self._ib.reqMktDataAsync(contract, "", False, False)
+                return await self._ib.reqMktDataAsync(contract, "", True, False)
             except Exception as exc:
                 error_code = getattr(exc, "errorCode", None)
                 if error_code == 354:
@@ -169,7 +173,7 @@ class IBKRDataFetcher(BaseDataFetcher):
 
     @property
     def ib(self) -> IB:
-        """Return the underlying ib_insync client instance."""
+        """Return the underlying ib_async client instance."""
         return self._ib
 
     async def fetch_option_chain(self, symbol: str) -> OptionChainSnapshot:
@@ -284,7 +288,10 @@ class IBKRDataFetcher(BaseDataFetcher):
                     "ask": float(ticker.ask or 0.0),
                     "mark": float(ticker.midpoint() or 0.0),
                     "delta": getattr(ticker.modelGreeks, "delta", 0.0) if ticker.modelGreeks else 0.0,
+                    "gamma": getattr(ticker.modelGreeks, "gamma", 0.0) if ticker.modelGreeks else 0.0,
+                    "vega": getattr(ticker.modelGreeks, "vega", 0.0) if ticker.modelGreeks else 0.0,
                     "theta": getattr(ticker.modelGreeks, "theta", 0.0) if ticker.modelGreeks else 0.0,
+                    "rho": getattr(ticker.modelGreeks, "rho", 0.0) if ticker.modelGreeks else 0.0,
                     "implied_volatility": getattr(ticker.modelGreeks, "impliedVol", 0.0)
                     if ticker.modelGreeks
                     else 0.0,
@@ -303,10 +310,20 @@ class IBKRDataFetcher(BaseDataFetcher):
         df = snapshot.to_pandas()
         if df.empty:
             return
-        timestamp_str = snapshot.timestamp.strftime("%Y%m%d_%H%M%S")
+        df = df.copy()
+        df["price"] = df.get("mark", 0.0)
+        timestamp_utc = snapshot.timestamp.replace(tzinfo=timezone.utc)
+        timestamp_str = timestamp_utc.strftime("%Y%m%d_%H%M%S")
         file_path = self.data_dir / f"{snapshot.symbol}_{timestamp_str}.parquet"
         df.to_parquet(file_path, index=False)
         logger.info("Saved option snapshot to {path}", path=str(file_path))
+
+        timestamp_local = timestamp_utc.astimezone(self._history_timezone)
+        df["timestamp"] = timestamp_local.isoformat()
+        history_path = self.history_dir / f"{timestamp_local.strftime('%Y%m%d')}.csv"
+        header = not history_path.exists()
+        df.to_csv(history_path, mode="a", header=header, index=False)
+        logger.info("Appended option snapshot to history file {path}", path=str(history_path))
 
     async def fetch_all(self, symbols: Iterable[str]) -> List[OptionChainSnapshot]:
         tasks = [self.fetch_option_chain(symbol) for symbol in symbols]

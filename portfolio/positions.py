@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 import pandas as pd
-from ib_insync import Contract, IB
+from ib_async import Contract, IB
 from loguru import logger
 
 

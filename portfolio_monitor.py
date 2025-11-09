@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 import pandas as pd
 import yaml
-from ib_insync import IB, Contract, Option
+from ib_async import IB, Contract, Option
 from loguru import logger
 
 from logging_utils import configure_logging
@@ -53,7 +53,7 @@ class PortfolioMonitor:
             delta = theta = 0.0
             days_to_expiry = None
             if isinstance(contract, Option):
-                ticker = await self._ib.reqMktDataAsync(contract, "", False, False)
+                ticker = await self._ib.reqMktDataAsync(contract, "", True, False)
                 if ticker.modelGreeks:
                     delta = ticker.modelGreeks.delta or 0.0
                     theta = ticker.modelGreeks.theta or 0.0
@@ -79,7 +79,7 @@ class PortfolioMonitor:
     async def _ensure_market_price(self, contract: Contract) -> float:
         if isinstance(contract, Option):
             await self._ib.qualifyContractsAsync(contract)
-        ticker = await self._ib.reqMktDataAsync(contract, "", False, False)
+        ticker = await self._ib.reqMktDataAsync(contract, "", True, False)
         price = ticker.last or ticker.close or ticker.marketPrice()
         return float(price or 0.0)
 
