@@ -45,13 +45,13 @@ class IBKROptionChainIntegrationTest(unittest.TestCase):
     def test_fetches_basic_nvda_option_quote(self) -> None:
         host, port = _resolve_gateway_endpoint()
         client_id = int(os.getenv("IAPI_CLIENT_ID", "1"))
-        market_data_type = os.getenv("IBKR_MARKET_DATA_TYPE", "DELAYED").upper()
+        market_data_type = os.getenv("IBKR_MARKET_DATA_TYPE", "FROZEN").upper()
 
         ib = IB()
         try:
             ib.connect(host, port, clientId=client_id, timeout=5)
             market_code = MARKET_DATA_TYPE_CODES.get(
-                market_data_type, MARKET_DATA_TYPE_CODES["DELAYED"]
+                market_data_type, MARKET_DATA_TYPE_CODES["FROZEN"]
             )
             ib.reqMarketDataType(market_code)
 

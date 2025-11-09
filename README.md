@@ -59,7 +59,7 @@ Install dependencies locally with `pip install -r requirements.txt` before runni
 Use this when you have captured option chain snapshots on disk and want to test strategy and Gemini integrations without starting the IBKR Gateway.
 
 ```bash
-python main.py --run-mode local --config config.yaml
+python main.py --run-mode local --market-data FROZEN --config config.yaml
 ```
 
 Place snapshot files (e.g., `NVDA_20240101_120000.parquet`) under the `data_dir` configured in `config.yaml`. The run finishes after processing the locally stored data once.
