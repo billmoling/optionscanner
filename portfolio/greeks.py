@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 import pandas as pd
-from ib_insync import IB, Option
+from ib_async import IB, Option
 from loguru import logger
 
 
-GREEK_COLUMNS = ["delta", "gamma", "vega", "theta"]
+GREEK_COLUMNS = ["delta", "gamma", "vega", "theta", "rho"]
 
 
 @dataclass(slots=True)
@@ -67,7 +67,7 @@ class GreekCalculator:
                 continue
             contract = self._build_option_contract(row)
             try:
-                ticker = self._ib.reqMktData(contract, "", False, False)
+                ticker = self._ib.reqMktData(contract, "", True, False)
                 try:
                     self._ib.sleep(0.1)
                 except Exception:

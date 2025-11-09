@@ -59,7 +59,7 @@ class IBKROptionChainIntegrationTest(unittest.TestCase):
             if not qualified_stock:
                 raise AssertionError("Unable to qualify NVDA stock contract")
             stock = qualified_stock[0]
-            stock_ticker = ib.reqMktData(stock, "", False, False)
+            stock_ticker = ib.reqMktData(stock, "", True, False)
 
             underlying_price = float("nan")
             deadline = time.monotonic() + 10.0
@@ -104,7 +104,7 @@ class IBKROptionChainIntegrationTest(unittest.TestCase):
             if not qualified_options:
                 raise AssertionError("Unable to qualify NVDA option contract")
             option_contract = qualified_options[0]
-            option_ticker = ib.reqMktData(option_contract, "", False, False)
+            option_ticker = ib.reqMktData(option_contract, "", True, False)
 
             bid = ask = mark = float("nan")
             deadline = time.monotonic() + 10.0

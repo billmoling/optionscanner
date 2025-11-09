@@ -11,6 +11,7 @@ schedule:
     - "06:30"
     - "10:00"
     - "12:15"
+    - "12:50"
   timezone: "America/Los_Angeles"
 slack:
   enabled: false

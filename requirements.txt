@@ -1,5 +1,5 @@
 pandas
-ib_insync
+ib_async
 loguru
 asyncio
 schedule
