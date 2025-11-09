@@ -15,8 +15,6 @@ from loguru import logger
 MARKET_DATA_TYPE_CODES = {
     "LIVE": 1,
     "FROZEN": 2,
-    "DELAYED": 3,
-    "DELAYED_FROZEN": 4,
 }
 MARKET_DATA_CODE_TO_NAME = {code: name for name, code in MARKET_DATA_TYPE_CODES.items()}
 
@@ -90,7 +88,6 @@ class IBKRDataFetcher(BaseDataFetcher):
         self._max_expiries = 4
         self._max_strikes_per_side = 12
         self._current_market_data_type_code: Optional[int] = None
-        self._using_delayed_fallback = False
 
     def _set_market_data_type(self, code: int, *, reason: Optional[str] = None) -> None:
         if self._current_market_data_type_code == code:
@@ -112,8 +109,7 @@ class IBKRDataFetcher(BaseDataFetcher):
 
     async def _request_tickers(self, *contracts: Contract) -> List[Any]:
         try:
-            if not self._using_delayed_fallback:
-                self._set_market_data_type(self._market_data_type_code)
+            self._set_market_data_type(self._market_data_type_code)
             if hasattr(self._ib, "reqTickersAsync"):
                 tickers = await self._ib.reqTickersAsync(*contracts)
             else:
@@ -121,14 +117,11 @@ class IBKRDataFetcher(BaseDataFetcher):
             return list(tickers)
         except Exception as exc:  # ib_insync raises IBError; fallback to generic for compatibility
             error_code = getattr(exc, "errorCode", None)
-            if error_code == 354 and not self._using_delayed_fallback:
-                delayed_code = MARKET_DATA_TYPE_CODES["DELAYED_FROZEN"]
-                self._using_delayed_fallback = True
-                self._set_market_data_type(
-                    delayed_code,
-                    reason="Live market data unavailable; falling back to delayed quotes",
-                )
-                return await self._request_tickers(*contracts)
+            if error_code == 354:
+                raise RuntimeError(
+                    "IBKR rejected the market data request (error 354). "
+                    "Ensure your account is entitled to the requested LIVE or FROZEN feed."
+                ) from exc
             raise
 
     async def _request_contract_details(self, contract: Contract) -> List[Any]:
@@ -139,19 +132,15 @@ class IBKRDataFetcher(BaseDataFetcher):
     async def _request_underlying_ticker(self, contract: Contract) -> Any:
         if hasattr(self._ib, "reqMktDataAsync"):
             try:
-                if not self._using_delayed_fallback:
-                    self._set_market_data_type(self._market_data_type_code)
+                self._set_market_data_type(self._market_data_type_code)
                 return await self._ib.reqMktDataAsync(contract, "", False, False)
             except Exception as exc:
                 error_code = getattr(exc, "errorCode", None)
-                if error_code == 354 and not self._using_delayed_fallback:
-                    delayed_code = MARKET_DATA_TYPE_CODES["DELAYED_FROZEN"]
-                    self._using_delayed_fallback = True
-                    self._set_market_data_type(
-                        delayed_code,
-                        reason="Live market data unavailable; falling back to delayed quotes",
-                    )
-                    return await self._ib.reqMktDataAsync(contract, "", False, False)
+                if error_code == 354:
+                    raise RuntimeError(
+                        f"IBKR rejected market data for {contract.symbol} (error 354). "
+                        "Verify that LIVE or FROZEN data permissions are enabled for this symbol."
+                    ) from exc
                 raise
         tickers = await self._request_tickers(contract)
         if not tickers:

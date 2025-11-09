@@ -46,14 +46,13 @@ class IBKROptionChainIntegrationTest(unittest.TestCase):
         host, port = _resolve_gateway_endpoint()
         client_id = int(os.getenv("IAPI_CLIENT_ID", "1"))
         market_data_type = os.getenv("IBKR_MARKET_DATA_TYPE", "FROZEN").upper()
+        if market_data_type not in MARKET_DATA_TYPE_CODES:
+            raise ValueError("IBKR_MARKET_DATA_TYPE must be 'LIVE' or 'FROZEN'")
 
         ib = IB()
         try:
             ib.connect(host, port, clientId=client_id, timeout=5)
-            market_code = MARKET_DATA_TYPE_CODES.get(
-                market_data_type, MARKET_DATA_TYPE_CODES["FROZEN"]
-            )
-            ib.reqMarketDataType(market_code)
+            ib.reqMarketDataType(MARKET_DATA_TYPE_CODES[market_data_type])
 
             stock = Stock("NVDA", "SMART", "USD")
             qualified_stock = ib.qualifyContracts(stock)

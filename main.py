@@ -72,8 +72,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--market-data",
         choices=sorted(MARKET_DATA_TYPE_CODES.keys()),
-        default="DELAYED_FROZEN",
-        help="Market data type requested from IBKR when using live data fetchers.",
+        default="FROZEN",
+        help="Market data type requested from IBKR when using live data fetchers (LIVE or FROZEN).",
     )
     parser.add_argument(
         "--compose-file",

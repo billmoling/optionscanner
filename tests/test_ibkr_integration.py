@@ -39,19 +39,18 @@ def _resolve_gateway_endpoint() -> tuple[str, int]:
 @unittest.skipUnless(
     _is_ibkr_gateway_configured(), "IBKR gateway settings not provided; skipping integration test."
 )
-class IBKRDelayedDataIntegrationTest(unittest.TestCase):
-    def test_fetches_nvda_delayed_price(self) -> None:
+class IBKRMarketDataIntegrationTest(unittest.TestCase):
+    def test_fetches_nvda_price(self) -> None:
         host, port = _resolve_gateway_endpoint()
         client_id = int(os.getenv("IAPI_CLIENT_ID", "1"))
-        market_data_type = os.getenv("IBKR_MARKET_DATA_TYPE", "DELAYED").upper()
+        market_data_type = os.getenv("IBKR_MARKET_DATA_TYPE", "FROZEN").upper()
+        if market_data_type not in MARKET_DATA_TYPE_CODES:
+            raise ValueError("IBKR_MARKET_DATA_TYPE must be 'LIVE' or 'FROZEN'")
 
         ib = IB()
         try:
             ib.connect(host, port, clientId=client_id, timeout=5)
-            market_code = MARKET_DATA_TYPE_CODES.get(
-                market_data_type, MARKET_DATA_TYPE_CODES["DELAYED"]
-            )
-            ib.reqMarketDataType(market_code)
+            ib.reqMarketDataType(MARKET_DATA_TYPE_CODES[market_data_type])
             contract = Stock("NVDA", "NASDAQ", "USD")
             ib.qualifyContracts(contract)
             ticker = ib.reqMktData(contract, "", False, False)
@@ -70,9 +69,9 @@ class IBKRDelayedDataIntegrationTest(unittest.TestCase):
             if ib.isConnected():
                 ib.disconnect()
 
-        self.assertGreater(price, 0.0, "Expected NVDA delayed price to be positive.")
+        self.assertGreater(price, 0.0, "Expected NVDA price to be positive.")
         print(
-            f"NVDA delayed price: {price:.2f} captured at {timestamp.isoformat()} "
+            f"NVDA price: {price:.2f} captured at {timestamp.isoformat()} "
             f"using {market_data_type} market data."
         )
 

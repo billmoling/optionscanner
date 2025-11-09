@@ -71,7 +71,7 @@ Start the IBKR Gateway via Docker Compose, fetch live market data once from the 
 ```bash
 python main.py --run-mode docker-immediate --config config.yaml \
   --compose-file docker-compose.yml --docker-service ib-gateway \
-  --market-data DELAYED_FROZEN
+  --market-data FROZEN
 ```
 
 The command automatically launches (or reuses) the `ib-gateway` service from the compose file before running the scanner on your host. Adjust `--market-data` if your IBKR account permits real-time feeds.
@@ -94,7 +94,7 @@ Scheduled run times are controlled via the `schedule` section of `config.yaml`. 
 | `--config PATH` | Path to the YAML configuration file (defaults to `config.yaml`). |
 | `--compose-file PATH` | Docker Compose file used to start services in Docker modes. |
 | `--docker-service NAME` | Service name for the IBKR Gateway inside the compose file. |
-| `--market-data TYPE` | IBKR market data type (`LIVE`, `FROZEN`, `DELAYED`, or `DELAYED_FROZEN`). |
+| `--market-data TYPE` | IBKR market data type (`LIVE` or `FROZEN`). |
 
 ## Running tests
 
@@ -143,7 +143,7 @@ Start the IBKR Gateway via Docker Compose (for example, `docker compose up -d ib
 python -m unittest tests.test_ibkr_integration
 ```
 
-The test connects to the gateway, requests the delayed NVDA stock price, and prints the captured quote. Override the default connection settings with `IBKR_HOST`, `IBKR_PORT`, or `IBKR_MARKET_DATA_TYPE` if needed. The port automatically follows `TRADING_MODE` (`4002` for paper, `4001` for live) unless `IBKR_PORT` is provided.
+The test connects to the gateway, requests the NVDA stock price over live or frozen market data, and prints the captured quote. Override the default connection settings with `IBKR_HOST`, `IBKR_PORT`, or `IBKR_MARKET_DATA_TYPE` if needed. The port automatically follows `TRADING_MODE` (`4002` for paper, `4001` for live) unless `IBKR_PORT` is provided.
 
 If you also want to confirm option-chain access end-to-end, run:
 
