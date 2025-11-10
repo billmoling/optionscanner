@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
+import os
 import pkgutil
 from enum import Enum
 from pathlib import Path
@@ -14,6 +15,7 @@ from loguru import logger
 
 from ai_agents import SignalExplainAgent, SignalValidationAgent
 from docker_utils import DockerController, DockerControllerError
+from dotenv import load_dotenv
 from logging_utils import configure_logging
 from notifications import SlackNotifier
 from option_data import IBKRDataFetcher, MARKET_DATA_TYPE_CODES
@@ -120,6 +122,7 @@ def execute_portfolio_manager(
 
 
 def main(argv: Optional[List[str]] = None) -> None:
+    load_dotenv()
     args = parse_args(argv)
     config = load_config(args.config)
     log_dir = Path(config.get("log_dir", "./logs"))
@@ -138,10 +141,18 @@ def main(argv: Optional[List[str]] = None) -> None:
     host = ibkr_settings.get("host", "127.0.0.1")
     port = ibkr_settings.get("port")
     client_id = ibkr_settings.get("client_id", 1)
-
+    disable_portfolio_manager = (
+        os.getenv("DISABLE_PORTFOLIO_MANAGER", "").strip().lower() in {"1", "true", "yes", "on"}
+    )
 
     explain_agent = SignalExplainAgent()
     validation_agent = SignalValidationAgent()
+
+    def maybe_run_portfolio_manager(fetcher: IBKRDataFetcher) -> None:
+        if disable_portfolio_manager:
+            logger.info("Portfolio manager disabled via DISABLE_PORTFOLIO_MANAGER")
+            return
+        execute_portfolio_manager(fetcher, portfolio_settings)
 
     if port is None:
         raise ValueError("IBKR port is not configured. Set 'ibkr.port' in the configuration.")
@@ -166,7 +177,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     slack_notifier=slack_notifier,
                 )
             )
-            execute_portfolio_manager(fetcher, portfolio_settings)
+            maybe_run_portfolio_manager(fetcher)
         except KeyboardInterrupt:
             logger.info("Shutdown requested by user")
         return
@@ -200,7 +211,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     slack_notifier=slack_notifier,
                 )
             )
-            execute_portfolio_manager(fetcher, portfolio_settings)
+            maybe_run_portfolio_manager(fetcher)
         else:
             asyncio.run(
                 run_scheduler(
@@ -210,7 +221,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     symbols,
                     results_dir,
                     slack_notifier,
-                    post_run=lambda: execute_portfolio_manager(fetcher, portfolio_settings),
+                    post_run=lambda: maybe_run_portfolio_manager(fetcher),
                 )
             )
     except KeyboardInterrupt:
