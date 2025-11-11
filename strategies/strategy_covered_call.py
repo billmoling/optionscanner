@@ -28,7 +28,9 @@ class CoveredCallStrategy(BaseOptionStrategy):
             chain = self._to_dataframe(snapshot)
             if chain.empty:
                 continue
-            underlying_price = float(snapshot.get("underlying_price", chain["underlying_price"].iloc[0]))
+            underlying_price = self._resolve_underlying_price(snapshot, chain)
+            if underlying_price is None or underlying_price <= 0:
+                continue
             for expiry, subset in chain.groupby("expiry"):
                 days_to_expiry = max((expiry - datetime.utcnow()).days, 1)
                 if days_to_expiry < self.min_days_to_expiry:
@@ -66,17 +68,19 @@ class CoveredCallStrategy(BaseOptionStrategy):
 
     def _to_dataframe(self, snapshot: Any) -> pd.DataFrame:
         if isinstance(snapshot, pd.DataFrame):
-            return snapshot
-        if hasattr(snapshot, "to_pandas"):
+            df = snapshot.copy()
+        elif hasattr(snapshot, "to_pandas"):
             df = snapshot.to_pandas()
         else:
-            df = pd.DataFrame(snapshot.get("options", []))
+            df = pd.DataFrame(self._snapshot_options(snapshot))
         if df.empty:
             return df
         if "expiry" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["expiry"]):
             df["expiry"] = pd.to_datetime(df["expiry"])
-        if "symbol" not in df.columns and "symbol" in snapshot:
-            df["symbol"] = snapshot["symbol"]
-        if "underlying_price" not in df.columns and "underlying_price" in snapshot:
-            df["underlying_price"] = snapshot["underlying_price"]
+        symbol = self._snapshot_value(snapshot, "symbol")
+        if "symbol" not in df.columns and symbol is not None:
+            df["symbol"] = symbol
+        underlying = self._snapshot_value(snapshot, "underlying_price")
+        if "underlying_price" not in df.columns and underlying is not None:
+            df["underlying_price"] = underlying
         return df
