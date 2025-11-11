@@ -138,6 +138,13 @@ class PositionLoader:
                 continue
             for pattern in patterns:
                 for path in sorted(directory.glob(pattern)):
+                    stem = path.stem.lower()
+                    if "summary" in stem:
+                        logger.debug(
+                            "Skipping summary file while loading positions | path={path}",
+                            path=str(path),
+                        )
+                        continue
                     yield path
 
     def _normalise(self, df: pd.DataFrame) -> pd.DataFrame:

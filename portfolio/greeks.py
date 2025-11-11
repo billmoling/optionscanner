@@ -42,7 +42,12 @@ class GreekCalculator:
         for column in GREEK_COLUMNS:
             enriched[column] = pd.to_numeric(enriched[column], errors="coerce").fillna(0.0)
             enriched[column] *= enriched.get("quantity", 0.0).astype(float)
-            multiplier = enriched.get("multiplier", 1.0).astype(float).replace(0.0, 1.0)
+            multiplier = (
+                enriched.get("multiplier", 1.0)
+                .astype(float)
+                .replace(0.0, 1.0)
+                .fillna(1.0)
+            )
             enriched[column] *= multiplier
 
         per_symbol = (
@@ -65,7 +70,17 @@ class GreekCalculator:
         for idx, row in df.iterrows():
             if row.get("sec_type", "OPT").upper() != "OPT":
                 continue
-            contract = self._build_option_contract(row)
+            try:
+                contract = self._build_option_contract(row)
+            except ValueError as exc:
+                logger.warning(
+                    "Skipping position due to invalid contract data | symbol={symbol} expiry={expiry} strike={strike} reason={error}",
+                    symbol=row.get("symbol"),
+                    expiry=row.get("expiry"),
+                    strike=row.get("strike"),
+                    error=exc,
+                )
+                continue
             try:
                 ticker = self._ib.reqMktData(contract, "", True, False)
                 try:
@@ -95,9 +110,22 @@ class GreekCalculator:
     def _build_option_contract(self, row: pd.Series) -> Option:
         expiry = str(row.get("expiry", ""))
         symbol = str(row.get("underlying") or row.get("symbol") or "")
-        strike = float(row.get("strike", 0.0) or 0.0)
+        if not symbol:
+            raise ValueError("missing symbol")
+        try:
+            strike = float(row.get("strike", 0.0) or 0.0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid strike") from exc
         right = str(row.get("right", "")) or "C"
-        multiplier = str(int(float(row.get("multiplier", 100) or 100)))
+        raw_multiplier = row.get("multiplier", 100)
+        multiplier_value: float
+        try:
+            multiplier_value = float(raw_multiplier)
+        except (TypeError, ValueError):
+            multiplier_value = 100.0
+        if pd.isna(multiplier_value) or multiplier_value <= 0.0:
+            multiplier_value = 100.0
+        multiplier = str(int(multiplier_value))
         contract = Option(
             symbol=symbol,
             lastTradeDateOrContractMonth=expiry,

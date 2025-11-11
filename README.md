@@ -95,6 +95,17 @@ Scheduled run times are controlled via the `schedule` section of `config.yaml`. 
 | `--compose-file PATH` | Docker Compose file used to start services in Docker modes. |
 | `--docker-service NAME` | Service name for the IBKR Gateway inside the compose file. |
 | `--market-data TYPE` | IBKR market data type (`LIVE` or `FROZEN`). |
+| `--portfolio-only` | Skip signal generation and run only the portfolio manager workflow. |
+
+### Portfolio-only mode
+
+Use `--portfolio-only` when you only need the portfolio risk workflow (positions, Greeks, risk checks, Slack summary) without fetching new option signals. The flag honors the selected `--run-mode`, so Docker helpers still start when requested, and it overrides the `DISABLE_PORTFOLIO_MANAGER` environment variable.
+
+```bash
+python main.py --portfolio-only --run-mode local --config config.yaml
+```
+
+You can combine the flag with Docker-backed modes (e.g., `--run-mode docker-immediate`) to ensure the IBKR gateway container is running before the portfolio manager connects.
 
 ## Signal output and Gemini usage
 

@@ -94,6 +94,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=Path("config.yaml"),
         help="Configuration file for the scanner.",
     )
+    parser.add_argument(
+        "--portfolio-only",
+        action="store_true",
+        help="Run only the portfolio management workflow and skip signal generation.",
+    )
     return parser.parse_args(argv)
 
 
@@ -129,9 +134,12 @@ def main(argv: Optional[List[str]] = None) -> None:
     configure_logging(log_dir, "strategy_signals")
 
     enable_gemini = bool(config.get("enable_gemini", True))
+    portfolio_only = bool(args.portfolio_only)
     results_dir = Path(config.get("results_dir", "./results"))
     slack_notifier = SlackNotifier(config.get("slack"))
-    strategies = discover_strategies()
+    strategies: List[BaseOptionStrategy] = []
+    if not portfolio_only:
+        strategies = discover_strategies()
     symbols: Sequence[str] = config.get("tickers", [])
     run_mode = RunMode(args.run_mode)
     data_dir = Path(config.get("data_dir", "./data"))
@@ -147,26 +155,52 @@ def main(argv: Optional[List[str]] = None) -> None:
         os.getenv("DISABLE_PORTFOLIO_MANAGER", "").strip().lower() in {"1", "true", "yes", "on"}
     )
 
-    explain_agent = SignalExplainAgent(enable_gemini=enable_gemini)
-    validation_agent = SignalValidationAgent(enable_gemini=enable_gemini)
+    if port is None:
+        raise ValueError("IBKR port is not configured. Set 'ibkr.port' in the configuration.")
+
+    if run_mode is not RunMode.LOCAL_IMMEDIATE:
+        docker_controller = DockerController(Path(args.compose_file))
+        try:
+            docker_controller.start_service(args.docker_service)
+        except DockerControllerError as exc:
+            logger.error("Unable to start Docker service: {error}", error=exc)
+            raise SystemExit(1) from exc
+
+    fetcher = IBKRDataFetcher(
+        host=host,
+        port=int(port),
+        client_id=int(client_id),
+        data_dir=data_dir,
+        market_data_type=args.market_data,
+    )
+
+    if portfolio_only and disable_portfolio_manager:
+        logger.info(
+            "--portfolio-only specified; ignoring DISABLE_PORTFOLIO_MANAGER environment override."
+        )
 
     def maybe_run_portfolio_manager(fetcher: IBKRDataFetcher) -> None:
-        if disable_portfolio_manager:
+        if disable_portfolio_manager and not portfolio_only:
             logger.info("Portfolio manager disabled via DISABLE_PORTFOLIO_MANAGER")
             return
         execute_portfolio_manager(fetcher, portfolio_settings)
 
-    if port is None:
-        raise ValueError("IBKR port is not configured. Set 'ibkr.port' in the configuration.")
+    if portfolio_only:
+        logger.info("Portfolio-only mode enabled; skipping option scanner execution.")
+        try:
+            asyncio.run(fetcher.connect())
+            execute_portfolio_manager(fetcher, portfolio_settings)
+        finally:
+            try:
+                asyncio.run(fetcher.disconnect())
+            except Exception:
+                logger.warning("Failed to cleanly disconnect IBKR after portfolio-only run")
+        return
+
+    explain_agent = SignalExplainAgent(enable_gemini=enable_gemini)
+    validation_agent = SignalValidationAgent(enable_gemini=enable_gemini)
 
     if run_mode is RunMode.LOCAL_IMMEDIATE:
-        fetcher = IBKRDataFetcher(
-            host=host,
-            port=int(port),
-            client_id=int(client_id),
-            data_dir=data_dir,
-            market_data_type=args.market_data,
-        )
         try:
             asyncio.run(
                 run_once(
@@ -184,22 +218,6 @@ def main(argv: Optional[List[str]] = None) -> None:
         except KeyboardInterrupt:
             logger.info("Shutdown requested by user")
         return
-
-    
-    docker_controller = DockerController(Path(args.compose_file))
-    try:
-        docker_controller.start_service(args.docker_service)
-    except DockerControllerError as exc:
-        logger.error("Unable to start Docker service: {error}", error=exc)
-        raise SystemExit(1) from exc
-
-    fetcher = IBKRDataFetcher(
-        host=host,
-        port=int(port),
-        client_id=int(client_id),
-        data_dir=data_dir,
-        market_data_type=args.market_data,
-    )
 
     try:
         if run_mode is RunMode.DOCKER_IMMEDIATE:
