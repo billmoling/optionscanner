@@ -24,7 +24,7 @@ class GeminiClientError(RuntimeError):
 class GeminiClient:
     """Lightweight wrapper for Google Gemini text generation."""
     'TODO: update model to use 2.5, the current API is my own account, which only have 2.0 access'
-    model_name: str = "gemini-2.0-flash"
+    model_name: str = "gemini-2.5-flash"
     api_key_env_vars: Sequence[str] = ("GOOGLE_API_KEY", "GEMINI_API_KEY")
     config_path_env_var: str = "GEMINI_CONFIG_PATH"
     config_file_candidates: Sequence[str] = (

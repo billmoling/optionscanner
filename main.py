@@ -128,6 +128,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     log_dir = Path(config.get("log_dir", "./logs"))
     configure_logging(log_dir, "strategy_signals")
 
+    enable_gemini = bool(config.get("enable_gemini", True))
     results_dir = Path(config.get("results_dir", "./results"))
     slack_notifier = SlackNotifier(config.get("slack"))
     strategies = discover_strategies()
@@ -136,6 +137,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     data_dir = Path(config.get("data_dir", "./data"))
     ibkr_settings = config.get("ibkr") or {}
     portfolio_settings = dict(config.get("portfolio", {}))
+    portfolio_settings.setdefault("enable_gemini", enable_gemini)
     if "slack" not in portfolio_settings and config.get("slack"):
         portfolio_settings["slack"] = config.get("slack")
     host = ibkr_settings.get("host", "127.0.0.1")
@@ -145,8 +147,8 @@ def main(argv: Optional[List[str]] = None) -> None:
         os.getenv("DISABLE_PORTFOLIO_MANAGER", "").strip().lower() in {"1", "true", "yes", "on"}
     )
 
-    explain_agent = SignalExplainAgent()
-    validation_agent = SignalValidationAgent()
+    explain_agent = SignalExplainAgent(enable_gemini=enable_gemini)
+    validation_agent = SignalValidationAgent(enable_gemini=enable_gemini)
 
     def maybe_run_portfolio_manager(fetcher: IBKRDataFetcher) -> None:
         if disable_portfolio_manager:
@@ -175,6 +177,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     explain_agent=explain_agent,
                     validation_agent=validation_agent,
                     slack_notifier=slack_notifier,
+                    enable_gemini=enable_gemini,
                 )
             )
             maybe_run_portfolio_manager(fetcher)
@@ -209,6 +212,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     explain_agent=explain_agent,
                     validation_agent=validation_agent,
                     slack_notifier=slack_notifier,
+                    enable_gemini=enable_gemini,
                 )
             )
             maybe_run_portfolio_manager(fetcher)
@@ -221,6 +225,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     symbols,
                     results_dir,
                     slack_notifier,
+                    enable_gemini=enable_gemini,
                     post_run=lambda: maybe_run_portfolio_manager(fetcher),
                 )
             )

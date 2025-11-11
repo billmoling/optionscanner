@@ -1,6 +1,7 @@
 """Utility agents for explaining and validating trade signals."""
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from statistics import mean
 from typing import Iterable, List, Optional
@@ -18,10 +19,13 @@ class SignalExplainAgent:
     """Generate a natural language explanation for a trade signal."""
 
     client: Optional[GeminiClient] = None
+    enable_gemini: bool = True
     templates: TemplateExplanationBuilder = field(default_factory=TemplateExplanationBuilder)
+    cooldown_seconds: int = 60
+    _rate_limited_until: float = field(init=False, default=0.0)
 
     def __post_init__(self) -> None:
-        if self.client is None:
+        if self.enable_gemini and self.client is None:
             self.client = GeminiClient()
 
     def explain(
@@ -48,27 +52,48 @@ class SignalExplainAgent:
             f"  Rationale: {signal.rationale or 'N/A'}\n"
             f"Market snapshot summary:\n{snapshot_summary or 'No recent market data provided.'}"
         )
+        if not self.enable_gemini:
+            logger.info(
+                "Gemini explain disabled via configuration; using template | symbol={symbol}",
+                symbol=signal.symbol,
+            )
+            return self._template_response(signal, snapshot)
+        if time.time() < self._rate_limited_until:
+            logger.info(
+                "Gemini explain temporarily disabled due to prior rate limit; using template | symbol={symbol}",
+                symbol=signal.symbol,
+            )
+            return self._template_response(signal, snapshot)
         try:
             explanation = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
-            logger.debug(
-                "Explain agent (Gemini) output | symbol={symbol} text={text}",
-                symbol=signal.symbol,
-                text=explanation,
-            )
-            return explanation
         except GeminiClientError as exc:
+            self._handle_rate_limit(exc)
             logger.warning(
                 "Falling back to template explanation | symbol={symbol} reason={error}",
                 symbol=signal.symbol,
                 error=exc,
             )
-            fallback = self.templates.build(signal, snapshot)
-            logger.debug(
-                "Explain agent (fallback) output | symbol={symbol} text={text}",
-                symbol=signal.symbol,
-                text=fallback,
-            )
-            return fallback
+            return self._template_response(signal, snapshot)
+        logger.debug(
+            "Explain agent (Gemini) output | symbol={symbol} text={text}",
+            symbol=signal.symbol,
+            text=explanation,
+        )
+        return explanation
+
+    def _template_response(self, signal: TradeSignal, snapshot: Optional[OptionChainSnapshot]) -> str:
+        fallback = self.templates.build(signal, snapshot)
+        logger.debug(
+            "Explain agent (fallback) output | symbol={symbol} text={text}",
+            symbol=signal.symbol,
+            text=fallback,
+        )
+        return fallback
+
+    def _handle_rate_limit(self, exc: GeminiClientError) -> None:
+        message = str(exc).lower()
+        if "429" in message or "resource exhausted" in message or "rate" in message:
+            self._rate_limited_until = time.time() + max(self.cooldown_seconds, 1)
 
     def _snapshot_summary(self, snapshot: Optional[OptionChainSnapshot]) -> str:
         if snapshot is None or not snapshot.options:
@@ -98,9 +123,12 @@ class SignalValidationAgent:
 
     lookback_limit: int = 20
     client: Optional[GeminiClient] = None
+    enable_gemini: bool = True
+    cooldown_seconds: int = 60
+    _rate_limited_until: float = field(init=False, default=0.0)
 
     def __post_init__(self) -> None:
-        if self.client is None:
+        if self.enable_gemini and self.client is None:
             self.client = GeminiClient()
 
     def review(
@@ -136,27 +164,39 @@ class SignalValidationAgent:
             f"Market snapshot summary:\n{self._snapshot_overview(snapshot) or 'No snapshot data supplied.'}\n"
             f"Peer signal summary:\n{peer_summary or 'No other signals for this batch.'}"
         )
+        if not self.enable_gemini:
+            logger.info(
+                "Gemini validation disabled via configuration; using heuristic | symbol={symbol}",
+                symbol=signal.symbol,
+            )
+            return self._fallback_review(signal, trend, alignment, peer_view)
+        if time.time() < self._rate_limited_until:
+            logger.info(
+                "Gemini validation temporarily disabled due to prior rate limit; using heuristic | symbol={symbol}",
+                symbol=signal.symbol,
+            )
+            return self._fallback_review(signal, trend, alignment, peer_view)
         try:
             review_text = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
-            logger.debug(
-                "Validation agent (Gemini) output | symbol={symbol} text={text}",
-                symbol=signal.symbol,
-                text=review_text,
-            )
-            return review_text
         except GeminiClientError as exc:
+            self._handle_rate_limit(exc)
             logger.warning(
                 "Falling back to heuristic validation | symbol={symbol} reason={error}",
                 symbol=signal.symbol,
                 error=exc,
             )
-            fallback = self._fallback_review(signal, trend, alignment, peer_view)
-            logger.debug(
-                "Validation agent (fallback) output | symbol={symbol} text={text}",
-                symbol=signal.symbol,
-                text=fallback,
-            )
-            return fallback
+            return self._fallback_review(signal, trend, alignment, peer_view)
+        logger.debug(
+            "Validation agent (Gemini) output | symbol={symbol} text={text}",
+            symbol=signal.symbol,
+            text=review_text,
+        )
+        return review_text
+
+    def _handle_rate_limit(self, exc: GeminiClientError) -> None:
+        message = str(exc).lower()
+        if "429" in message or "resource exhausted" in message or "rate" in message:
+            self._rate_limited_until = time.time() + max(self.cooldown_seconds, 1)
 
     def _fallback_review(
         self,

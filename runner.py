@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -26,6 +27,7 @@ async def run_once(
     explain_agent: Optional[SignalExplainAgent] = None,
     validation_agent: Optional[SignalValidationAgent] = None,
     slack_notifier: Optional[SlackNotifier] = None,
+    enable_gemini: bool = True,
 ) -> None:
     snapshots = await fetcher.fetch_all(symbols)
     aggregated_signals: List[Tuple[str, TradeSignal]] = []
@@ -40,8 +42,8 @@ async def run_once(
         logger.info("No trade signals generated in this iteration")
         return
     results_dir.mkdir(parents=True, exist_ok=True)
-    explain_agent = explain_agent or SignalExplainAgent()
-    validation_agent = validation_agent or SignalValidationAgent()
+    explain_agent = explain_agent or SignalExplainAgent(enable_gemini=enable_gemini)
+    validation_agent = validation_agent or SignalValidationAgent(enable_gemini=enable_gemini)
     snapshot_by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
     rows: List[Dict[str, Any]] = []
     signals_only = [signal for _strategy_name, signal in aggregated_signals]
@@ -49,7 +51,7 @@ async def run_once(
         snapshot = snapshot_by_symbol.get(signal.symbol)
         explanation = explain_agent.explain(signal, snapshot)
         validation = validation_agent.review(signal, snapshot, signals_only)
-        row = signal.__dict__.copy()
+        row = asdict(signal)
         row.update(
             {
                 "explanation": explanation,
@@ -59,6 +61,20 @@ async def run_once(
         )
         rows.append(row)
     df = pd.DataFrame(rows)
+    preferred_order = [
+        "symbol",
+        "expiry",
+        "strike",
+        "option_type",
+        "strategy",
+        "direction",
+        "rationale",
+        "explanation",
+        "validation",
+    ]
+    ordered_columns = [col for col in preferred_order if col in df.columns]
+    remaining_columns = [col for col in df.columns if col not in ordered_columns]
+    df = df[ordered_columns + remaining_columns]
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     file_path = results_dir / f"signals_{timestamp}.csv"
     df.to_csv(file_path, index=False)
@@ -77,6 +93,7 @@ async def run_scheduler(
     results_dir: Path,
     slack_notifier: Optional[SlackNotifier],
     *,
+    enable_gemini: bool = True,
     post_run: Optional[Callable[[], None]] = None,
 ) -> None:
     schedule_config = config.get("schedule", {})
@@ -95,8 +112,8 @@ async def run_scheduler(
         timezone=getattr(tz, "key", str(tz)),
     )
 
-    explain_agent = SignalExplainAgent()
-    validation_agent = SignalValidationAgent()
+    explain_agent = SignalExplainAgent(enable_gemini=enable_gemini)
+    validation_agent = SignalValidationAgent(enable_gemini=enable_gemini)
 
     while True:
         now = datetime.now(tz)
@@ -119,6 +136,7 @@ async def run_scheduler(
                 explain_agent=explain_agent,
                 validation_agent=validation_agent,
                 slack_notifier=slack_notifier,
+                enable_gemini=enable_gemini,
             )
             if post_run is not None:
                 try:

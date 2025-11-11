@@ -89,6 +89,16 @@ class SignalExplainAgentTests(unittest.TestCase):
         self.assertIn("setup anticipates strength", explanation or "")
         self.assertIn(signal.symbol, explanation)
 
+    def test_explain_agent_can_disable_gemini(self) -> None:
+        client = DummyGeminiClient(response="Gemini explanation")
+        agent = SignalExplainAgent(client=client, enable_gemini=False)
+        signal = build_signal()
+
+        explanation = agent.explain(signal, None)
+
+        self.assertIn(signal.symbol, explanation)
+        self.assertIsNone(client.last_user_prompt)
+
 
 class SignalValidationAgentTests(unittest.TestCase):
     def test_validation_agent_uses_gemini(self) -> None:
@@ -110,6 +120,16 @@ class SignalValidationAgentTests(unittest.TestCase):
         review = agent.review(signal, None, [])
 
         self.assertTrue(review)
+
+    def test_validation_agent_can_disable_gemini(self) -> None:
+        client = DummyGeminiClient(response="should not be used")
+        agent = SignalValidationAgent(client=client, enable_gemini=False)
+        signal = build_signal()
+
+        review = agent.review(signal, None, [])
+
+        self.assertTrue(review)
+        self.assertIsNone(client.last_user_prompt)
 
 
 if __name__ == "__main__":

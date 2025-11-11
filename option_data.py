@@ -4,9 +4,9 @@ from __future__ import annotations
 import asyncio
 import math
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 from ib_async import Contract, IB, Option, Stock
@@ -98,7 +98,8 @@ class IBKRDataFetcher(BaseDataFetcher):
         self._lock = asyncio.Lock()
         self._current_market_data_type_code: Optional[int] = None
         self._history_timezone = ZoneInfo("America/Los_Angeles")
-        self._max_expiries = 4
+        self._max_expiries = 32  # cover ≈3 months of weekly expirations
+        self._expiry_horizon_days = 92
         self._max_strikes_per_side = 8
         self._contracts_per_chunk = 40
 
@@ -229,10 +230,25 @@ class IBKRDataFetcher(BaseDataFetcher):
         return cleaned
 
     def _select_expiries(self, expirations: Sequence[str]) -> List[str]:
-        cleaned = sorted(exp for exp in expirations if exp)
-        if not cleaned:
+        today = datetime.utcnow().date()
+        horizon = today + timedelta(days=self._expiry_horizon_days)
+        in_window: List[Tuple[date, str]] = []
+        fallback: List[Tuple[date, str]] = []
+        for expiry in expirations:
+            if not expiry:
+                continue
+            try:
+                expiry_date = datetime.strptime(expiry, "%Y%m%d").date()
+            except ValueError:
+                continue
+            fallback.append((expiry_date, expiry))
+            if today <= expiry_date <= horizon:
+                in_window.append((expiry_date, expiry))
+        candidates = in_window or fallback
+        if not candidates:
             raise RuntimeError("Option chain metadata did not include expirations")
-        return cleaned[: self._max_expiries]
+        candidates.sort(key=lambda item: item[0])
+        return [expiry for _, expiry in candidates[: self._max_expiries]]
 
     def _select_strikes(self, strikes: Sequence[Any], reference_price: float) -> List[float]:
         cleaned = sorted(set(self._sanitize_floats(strikes)))

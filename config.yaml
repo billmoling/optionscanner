@@ -4,8 +4,18 @@ ibkr:
   client_id: 1
 tickers:
   - NVDA
+  - AAPL
+  - MSFT
+  - AMZN
+  - GOOG
+  - META
+  - TSLA
+  - INTC
+  - AMD
+  - NFLX
 log_dir: "./logs"
 data_dir: "./data"
+enable_gemini: false
 schedule:
   times:
     - "06:30"

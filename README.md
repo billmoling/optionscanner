@@ -96,6 +96,18 @@ Scheduled run times are controlled via the `schedule` section of `config.yaml`. 
 | `--docker-service NAME` | Service name for the IBKR Gateway inside the compose file. |
 | `--market-data TYPE` | IBKR market data type (`LIVE` or `FROZEN`). |
 
+## Signal output and Gemini usage
+
+Each run writes a timestamped CSV under `results/` (for example, `signals_20251110_184922.csv`). Columns now appear in the order `symbol, expiry, strike, option_type, strategy, direction, rationale, explanation, validation` so the originating strategy is visible before the directional bias.
+
+Gemini calls for explanations/validation can be disabled globally via `enable_gemini` in `config.yaml`:
+
+```yaml
+enable_gemini: false
+```
+
+When the flag is `false`, the scanner skips Google Gemini requests and instead emits the built-in template explanations and heuristic validation summaries while continuing to export strategy results and Slack notifications.
+
 ## Running tests
 
 The project ships with focused unit tests for AI agents, strategy logic, and Slack notifications. Execute the full suite with:
