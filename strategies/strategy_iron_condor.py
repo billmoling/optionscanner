@@ -14,11 +14,11 @@ class IronCondorStrategy(BaseOptionStrategy):
 
     def __init__(
         self,
-        target_prob_itm: float = 0.15,
-        premium_threshold: float = 1.0,
-        min_credit_pct: float = 0.01,
-        max_expiries_per_symbol: int = 3,
-        allowed_symbols: Optional[Iterable[str]] = None,
+        target_prob_itm: float = 0.15,  # delta/probability target for short legs (e.g., 15% ITM ≈ 0.15 delta)
+        premium_threshold: float = 1.0,  # minimum absolute credit (per condor) worth trading, in dollars
+        min_credit_pct: float = 0.01,  # minimum credit as % of underlying (guards against low premium vs. risk)
+        max_expiries_per_symbol: int = 3,  # cap how many expirations per symbol we evaluate each run
+        allowed_symbols: Optional[Iterable[str]] = None,  # whitelist underlyings (defaults to SPY/QQQ/IWM)
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
