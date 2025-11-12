@@ -109,7 +109,7 @@ You can combine the flag with Docker-backed modes (e.g., `--run-mode docker-imme
 
 ## Signal output and Gemini usage
 
-Each run writes a timestamped CSV under `results/` (for example, `signals_20251110_184922.csv`). Columns now appear in the order `symbol, expiry, strike, option_type, strategy, direction, rationale, explanation, validation` so the originating strategy is visible before the directional bias.
+Each run writes a timestamped CSV under `results/` (for example, `signals_20251110_184922.csv`). The default column order is `symbol, expiry, strike, option_type, strategy, direction, rationale` and the optional `explanation`/`validation` fields are appended only when Gemini output is enabled so files stay compact when AI summaries are disabled.
 
 Gemini calls for explanations/validation can be disabled globally via `enable_gemini` in `config.yaml`:
 
@@ -117,7 +117,7 @@ Gemini calls for explanations/validation can be disabled globally via `enable_ge
 enable_gemini: false
 ```
 
-When the flag is `false`, the scanner skips Google Gemini requests and instead emits the built-in template explanations and heuristic validation summaries while continuing to export strategy results and Slack notifications.
+When the flag is `false`, the scanner skips Google Gemini requests altogether—no explanation or validation text is generated, and those columns are omitted from the CSV/Slack output—while continuing to export strategy results and Slack notifications.
 
 ## Running tests
 

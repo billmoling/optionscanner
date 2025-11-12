@@ -42,23 +42,25 @@ async def run_once(
         logger.info("No trade signals generated in this iteration")
         return
     results_dir.mkdir(parents=True, exist_ok=True)
-    explain_agent = explain_agent or SignalExplainAgent(enable_gemini=enable_gemini)
-    validation_agent = validation_agent or SignalValidationAgent(enable_gemini=enable_gemini)
+    if enable_gemini and explain_agent is None:
+        explain_agent = SignalExplainAgent(enable_gemini=True)
+    if enable_gemini and validation_agent is None:
+        validation_agent = SignalValidationAgent(enable_gemini=True)
     snapshot_by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
     rows: List[Dict[str, Any]] = []
     signals_only = [signal for _strategy_name, signal in aggregated_signals]
     for strategy_name, signal in aggregated_signals:
         snapshot = snapshot_by_symbol.get(signal.symbol)
-        explanation = explain_agent.explain(signal, snapshot)
-        validation = validation_agent.review(signal, snapshot, signals_only)
         row = asdict(signal)
         row.update(
             {
-                "explanation": explanation,
-                "validation": validation,
                 "strategy": strategy_name,
             }
         )
+        if explain_agent:
+            row["explanation"] = explain_agent.explain(signal, snapshot)
+        if validation_agent:
+            row["validation"] = validation_agent.review(signal, snapshot, signals_only)
         rows.append(row)
     df = pd.DataFrame(rows)
     preferred_order = [
@@ -112,8 +114,8 @@ async def run_scheduler(
         timezone=getattr(tz, "key", str(tz)),
     )
 
-    explain_agent = SignalExplainAgent(enable_gemini=enable_gemini)
-    validation_agent = SignalValidationAgent(enable_gemini=enable_gemini)
+    explain_agent = SignalExplainAgent(enable_gemini=enable_gemini) if enable_gemini else None
+    validation_agent = SignalValidationAgent(enable_gemini=enable_gemini) if enable_gemini else None
 
     while True:
         now = datetime.now(tz)

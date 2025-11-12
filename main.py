@@ -197,8 +197,12 @@ def main(argv: Optional[List[str]] = None) -> None:
                 logger.warning("Failed to cleanly disconnect IBKR after portfolio-only run")
         return
 
-    explain_agent = SignalExplainAgent(enable_gemini=enable_gemini)
-    validation_agent = SignalValidationAgent(enable_gemini=enable_gemini)
+    explain_agent = (
+        SignalExplainAgent(enable_gemini=enable_gemini) if enable_gemini else None
+    )
+    validation_agent = (
+        SignalValidationAgent(enable_gemini=enable_gemini) if enable_gemini else None
+    )
 
     if run_mode is RunMode.LOCAL_IMMEDIATE:
         try:
