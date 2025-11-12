@@ -13,6 +13,9 @@ tickers:
   - INTC
   - AMD
   - NFLX
+  - SPY
+  - QQQ
+  - IWM
 log_dir: "./logs"
 data_dir: "./data"
 enable_gemini: false
