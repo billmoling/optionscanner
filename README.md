@@ -30,15 +30,15 @@ docker compose up -d ib-gateway
    Attach a VNC client to `localhost:5900` and follow the prompts (password is documented in the upstream image). After IBKR finishes loading, you can close VNC; the container keeps running and reconnects on failure according to the environment settings.
 
 4. **Point the scanner at the container.**  
-   The default `config.yaml` already targets the host loopback:
+   Set the connection details via `.env` so each host (developer laptop, Raspberry Pi, etc.) can override them without editing `config.yaml`:
 
-   ```yaml
-   ibkr:
-     host: "127.0.0.1"
-     port: 4002      # pair with TRADING_MODE=paper; switch to 4001 for live
+   ```dotenv
+   IBKR_HOST=127.0.0.1
+   IBKR_PORT=4002    # 4001 when TRADING_MODE=live
+   IBKR_CLIENT_ID=1
    ```
 
-   When running on another machine (e.g., Raspberry Pi), set `ibkr.host` to the Docker host’s IP address or SSH tunnel endpoint.
+   The `ibkr` block in `config.yaml` now defers to those environment variables by default, but you can still hard-code overrides in the YAML if needed.
 
 5. **Stop the gateway when finished.**
 
