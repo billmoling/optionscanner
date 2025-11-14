@@ -4,15 +4,19 @@ FROM python:3.12.12-slim-bookworm
 # Set the working directory
 WORKDIR /app
 
-# Install uv (using the official method)
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
+# --- REMOVED LINES ---
+# RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+# ENV PATH="/root/.cargo/bin:$PATH"
+# ---------------------
 
 # Copy only the requirements file first to leverage Docker cache
 COPY requirements.txt .
 
-# Install dependencies with uv
-RUN uv pip install --system -r requirements.txt
+# --- NEW COMBINED COMMAND ---
+# Install uv, export its path, and use it all in one RUN layer
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && export PATH="/root/.cargo/bin:$PATH" \
+    && uv pip install --system -r requirements.txt
 
 # Copy the rest of your application code
 COPY . .
