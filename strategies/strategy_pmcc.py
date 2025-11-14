@@ -25,7 +25,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
         short_otm_pct: float = 0.05,
         short_delta_range: Tuple[float, float] = (0.2, 0.45),
         short_min_theta_abs: float = 0.04,
-        min_return_on_capital: float = 0.12,
+        min_return_on_capital: float = 0.08, # minimum return on capital for PMCC trade ideas, it could be lower to 0.08-0.12
         max_trade_ideas: int = 5,
         **kwargs: Any,
     ) -> None:
