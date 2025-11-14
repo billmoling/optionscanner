@@ -100,6 +100,8 @@ class IBKRDataFetcher(BaseDataFetcher):
         self._history_timezone = ZoneInfo("America/Los_Angeles")
         self._max_expiries = 32  # cover ≈3 months of weekly expirations
         self._expiry_horizon_days = 92
+        self._leaps_min_days = 240
+        self._leaps_max_days = 300
         self._max_strikes_per_side = 8
         self._contracts_per_chunk = 40
 
@@ -232,8 +234,13 @@ class IBKRDataFetcher(BaseDataFetcher):
     def _select_expiries(self, expirations: Sequence[str]) -> List[str]:
         today = datetime.now(timezone.utc).date()
         horizon = today + timedelta(days=self._expiry_horizon_days)
-        in_window: List[Tuple[date, str]] = []
-        fallback: List[Tuple[date, str]] = []
+        leaps_start = today + timedelta(days=self._leaps_min_days)
+        leaps_end = today + timedelta(days=self._leaps_max_days)
+
+        near_term: List[Tuple[date, str]] = []
+        leaps: List[Tuple[date, str]] = []
+        others: List[Tuple[date, str]] = []
+
         for expiry in expirations:
             if not expiry:
                 continue
@@ -241,14 +248,35 @@ class IBKRDataFetcher(BaseDataFetcher):
                 expiry_date = datetime.strptime(expiry, "%Y%m%d").date()
             except ValueError:
                 continue
-            fallback.append((expiry_date, expiry))
+
+            bucket = others
             if today <= expiry_date <= horizon:
-                in_window.append((expiry_date, expiry))
-        candidates = in_window or fallback
-        if not candidates:
+                bucket = near_term
+            elif leaps_start <= expiry_date <= leaps_end:
+                bucket = leaps
+            bucket.append((expiry_date, expiry))
+
+        if not (near_term or leaps or others):
             raise RuntimeError("Option chain metadata did not include expirations")
-        candidates.sort(key=lambda item: item[0])
-        return [expiry for _, expiry in candidates[: self._max_expiries]]
+
+        key = lambda item: item[0]
+        near_term.sort(key=key)
+        leaps.sort(key=key)
+        others.sort(key=key)
+
+        selections: List[Tuple[date, str]] = []
+        leaps_budget = min(len(leaps), self._max_expiries)
+        near_budget = max(self._max_expiries - leaps_budget, 0)
+
+        selections.extend(near_term[:near_budget])
+        selections.extend(leaps[:leaps_budget])
+
+        remaining_slots = self._max_expiries - len(selections)
+        if remaining_slots > 0:
+            remaining_candidates = near_term[near_budget:] + leaps[leaps_budget:] + others
+            selections.extend(remaining_candidates[:remaining_slots])
+
+        return [expiry for _, expiry in selections]
 
     def _select_strikes(self, strikes: Sequence[Any], reference_price: float) -> List[float]:
         cleaned = sorted(set(self._sanitize_floats(strikes)))
