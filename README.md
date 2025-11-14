@@ -64,21 +64,9 @@ python main.py --run-mode local --market-data FROZEN --config config.yaml
 
 Place snapshot files (e.g., `NVDA_20240101_120000.parquet`) under the `data_dir` configured in `config.yaml`. The run finishes after processing the locally stored data once.
 
-### 2. Immediate Docker-backed run
+### 2. Scheduled Docker run
 
-Start the IBKR Gateway via Docker Compose, fetch live market data once from the host-based scanner, and exit. This mode simply guarantees the `ib-gateway` container is running before the local process connects, which makes host and Raspberry Pi workflows identical.
-
-```bash
-python main.py --run-mode docker-immediate --config config.yaml \
-  --compose-file docker-compose.yml --docker-service ib-gateway \
-  --market-data FROZEN
-```
-
-The command automatically launches (or reuses) the `ib-gateway` service from the compose file before running the scanner on your host. Adjust `--market-data` if your IBKR account permits real-time feeds.
-
-### 3. Scheduled Docker run
-
-Run the scanner continuously on the configured schedule while keeping the `ib-gateway` container alive in the background.
+Run the scanner continuously on the configured schedule while keeping your separately managed `ib-gateway` container alive in the background. Start the gateway first (for example, `docker compose up -d ib-gateway`), then launch the scanner:
 
 ```bash
 python main.py --run-mode docker-scheduled --config config.yaml
@@ -90,10 +78,8 @@ Scheduled run times are controlled via the `schedule` section of `config.yaml`. 
 
 | Flag | Description |
 | --- | --- |
-| `--run-mode {local,docker-immediate,docker-scheduled}` | Select the execution mode. |
+| `--run-mode {local,docker-scheduled}` | Select the execution mode. |
 | `--config PATH` | Path to the YAML configuration file (defaults to `config.yaml`). |
-| `--compose-file PATH` | Docker Compose file used to start services in Docker modes. |
-| `--docker-service NAME` | Service name for the IBKR Gateway inside the compose file. |
 | `--market-data TYPE` | IBKR market data type (`LIVE` or `FROZEN`). |
 | `--portfolio-only` | Skip signal generation and run only the portfolio manager workflow. |
 
@@ -105,7 +91,7 @@ Use `--portfolio-only` when you only need the portfolio risk workflow (positions
 python main.py --portfolio-only --run-mode local --config config.yaml
 ```
 
-You can combine the flag with Docker-backed modes (e.g., `--run-mode docker-immediate`) to ensure the IBKR gateway container is running before the portfolio manager connects.
+You can combine the flag with Docker-backed modes (e.g., `--run-mode docker-scheduled`) to ensure the IBKR gateway container is running before the portfolio manager connects.
 
 ## Signal output and Gemini usage
 

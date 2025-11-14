@@ -14,7 +14,6 @@ import yaml
 from loguru import logger
 
 from ai_agents import SignalExplainAgent, SignalValidationAgent
-from docker_utils import DockerController, DockerControllerError
 from dotenv import load_dotenv
 from logging_utils import configure_logging
 from notifications import SlackNotifier
@@ -28,7 +27,6 @@ class RunMode(str, Enum):
     """Supported execution modes for the scanner."""
 
     LOCAL_IMMEDIATE = "local"
-    DOCKER_IMMEDIATE = "docker-immediate"
     DOCKER_SCHEDULED = "docker-scheduled"
 
 
@@ -69,24 +67,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--run-mode",
         choices=[mode.value for mode in RunMode],
         default=RunMode.LOCAL_IMMEDIATE.value,
-        help="Select how the scanner executes: local (no Docker), docker-immediate, or docker-scheduled.",
+        help="Select how the scanner executes: local (single run) or docker-scheduled (continuous loop).",
     )
     parser.add_argument(
         "--market-data",
         choices=sorted(MARKET_DATA_TYPE_CODES.keys()),
         default="LIVE",
         help="Market data type requested from IBKR when using live data fetchers (LIVE or FROZEN).",
-    )
-    parser.add_argument(
-        "--compose-file",
-        type=Path,
-        default=Path("docker-compose.yml"),
-        help="Path to the docker-compose file used when starting Docker services.",
-    )
-    parser.add_argument(
-        "--docker-service",
-        default="ib-gateway",
-        help="Name of the docker-compose service that hosts the IBKR gateway.",
     )
     parser.add_argument(
         "--config",
@@ -158,14 +145,6 @@ def main(argv: Optional[List[str]] = None) -> None:
     if port is None:
         raise ValueError("IBKR port is not configured. Set 'ibkr.port' in the configuration.")
 
-    if run_mode is not RunMode.LOCAL_IMMEDIATE:
-        docker_controller = DockerController(Path(args.compose_file))
-        try:
-            docker_controller.start_service(args.docker_service)
-        except DockerControllerError as exc:
-            logger.error("Unable to start Docker service: {error}", error=exc)
-            raise SystemExit(1) from exc
-
     fetcher = IBKRDataFetcher(
         host=host,
         port=int(port),
@@ -224,33 +203,18 @@ def main(argv: Optional[List[str]] = None) -> None:
         return
 
     try:
-        if run_mode is RunMode.DOCKER_IMMEDIATE:
-            asyncio.run(
-                run_once(
-                    fetcher,
-                    strategies,
-                    symbols,
-                    results_dir,
-                    explain_agent=explain_agent,
-                    validation_agent=validation_agent,
-                    slack_notifier=slack_notifier,
-                    enable_gemini=enable_gemini,
-                )
+        asyncio.run(
+            run_scheduler(
+                config,
+                fetcher,
+                strategies,
+                symbols,
+                results_dir,
+                slack_notifier,
+                enable_gemini=enable_gemini,
+                post_run=lambda: maybe_run_portfolio_manager(fetcher),
             )
-            maybe_run_portfolio_manager(fetcher)
-        else:
-            asyncio.run(
-                run_scheduler(
-                    config,
-                    fetcher,
-                    strategies,
-                    symbols,
-                    results_dir,
-                    slack_notifier,
-                    enable_gemini=enable_gemini,
-                    post_run=lambda: maybe_run_portfolio_manager(fetcher),
-                )
-            )
+        )
     except KeyboardInterrupt:
         logger.info("Shutdown requested by user")
 
