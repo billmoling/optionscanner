@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import pandas as pd
+from loguru import logger
 
 from .base import BaseOptionStrategy, TradeSignal
 
@@ -38,24 +39,43 @@ class IronCondorStrategy(BaseOptionStrategy):
         for snapshot in data:
             chain = self._to_dataframe(snapshot)
             if chain.empty:
+                logger.debug("IronCondor skip snapshot: empty chain")
                 continue
             symbol = str(chain["symbol"].iloc[0]).upper()
             if symbol not in self.allowed_symbols:
+                logger.debug("IronCondor skip snapshot: symbol not allowed | symbol={symbol}", symbol=symbol)
                 continue
             underlying_price = self._resolve_underlying_price(snapshot, chain)
             if underlying_price is None or underlying_price <= 0:
+                logger.debug(
+                    "IronCondor skip snapshot: invalid underlying | symbol={symbol} price={price}",
+                    symbol=symbol,
+                    price=underlying_price,
+                )
                 continue
             chain = chain.sort_values("strike")
             expiry_groups = chain.groupby("expiry")
             processed_expiries = 0
             for expiry, subset in expiry_groups:
                 if (expiry - datetime.now(timezone.utc)).days < 21:
+                    logger.debug(
+                        "IronCondor skip expiry: too few days to expiry | symbol={symbol} expiry={expiry}",
+                        symbol=symbol,
+                        expiry=expiry.isoformat(),
+                    )
                     continue
                 if self.max_expiries_per_symbol and processed_expiries >= self.max_expiries_per_symbol:
                     break
                 calls = subset[subset["option_type"] == "CALL"]
                 puts = subset[subset["option_type"] == "PUT"]
                 if calls.empty or puts.empty:
+                    logger.debug(
+                        "IronCondor skip expiry: missing option side | symbol={symbol} expiry={expiry} calls_empty={calls} puts_empty={puts}",
+                        symbol=symbol,
+                        expiry=expiry.isoformat(),
+                        calls=calls.empty,
+                        puts=puts.empty,
+                    )
                     continue
                 condor, total_credit, max_loss = self._build_condor(
                     subset["symbol"].iloc[0],
@@ -64,11 +84,27 @@ class IronCondorStrategy(BaseOptionStrategy):
                     puts,
                     underlying_price,
                 )
-                if condor is None or total_credit <= 0.0 or max_loss <= 0.0:
+                if condor is None:
+                    continue
+                if total_credit <= 0.0 or max_loss <= 0.0:
+                    logger.debug(
+                        "IronCondor skip condor: invalid payoff | symbol={symbol} expiry={expiry} total_credit={credit} max_loss={loss}",
+                        symbol=symbol,
+                        expiry=expiry.isoformat(),
+                        credit=total_credit,
+                        loss=max_loss,
+                    )
                     continue
                 symbol = condor["symbol"]
                 denominator = self.spread_width - total_credit
                 if denominator <= 0:
+                    logger.debug(
+                        "IronCondor skip condor: invalid denominator | symbol={symbol} expiry={expiry} total_credit={credit} spread_width={width}",
+                        symbol=symbol,
+                        expiry=expiry.isoformat(),
+                        credit=total_credit,
+                        width=self.spread_width,
+                    )
                     continue
                 ror = total_credit / denominator
                 current_best = best_by_symbol.get(symbol)
@@ -114,6 +150,7 @@ class IronCondorStrategy(BaseOptionStrategy):
         puts = puts.sort_values("strike").reset_index(drop=True).copy()
 
         if len(calls) < 2 or len(puts) < 2:
+            self._log_rejection("insufficient_legs", symbol, expiry, calls=len(calls), puts=len(puts))
             return None, 0.0, 0.0
 
         for frame in (calls, puts):
@@ -124,6 +161,13 @@ class IronCondorStrategy(BaseOptionStrategy):
         put_max = put_delta_target + self.delta_tolerance
         put_candidates = puts[puts["delta"].between(put_min, put_max)]
         if put_candidates.empty:
+            self._log_rejection(
+                "no_put_candidate",
+                symbol,
+                expiry,
+                delta_target=put_delta_target,
+                tolerance=self.delta_tolerance,
+            )
             return None, 0.0, 0.0
         short_put = puts.loc[(put_candidates["delta"] - put_delta_target).abs().idxmin()]
 
@@ -132,6 +176,13 @@ class IronCondorStrategy(BaseOptionStrategy):
         call_max = call_delta_target + self.delta_tolerance
         call_candidates = calls[calls["delta"].between(call_min, call_max)]
         if call_candidates.empty:
+            self._log_rejection(
+                "no_call_candidate",
+                symbol,
+                expiry,
+                delta_target=call_delta_target,
+                tolerance=self.delta_tolerance,
+            )
             return None, 0.0, 0.0
         short_call = calls.loc[(call_candidates["delta"] - call_delta_target).abs().idxmin()]
 
@@ -140,15 +191,34 @@ class IronCondorStrategy(BaseOptionStrategy):
 
         long_put_matches = puts[abs(puts["strike"] - long_put_strike) < 1e-6]
         if long_put_matches.empty:
+            self._log_rejection(
+                "missing_long_put",
+                symbol,
+                expiry,
+                target_strike=long_put_strike,
+            )
             return None, 0.0, 0.0
         long_put = long_put_matches.iloc[0]
 
         long_call_matches = calls[abs(calls["strike"] - long_call_strike) < 1e-6]
         if long_call_matches.empty:
+            self._log_rejection(
+                "missing_long_call",
+                symbol,
+                expiry,
+                target_strike=long_call_strike,
+            )
             return None, 0.0, 0.0
         long_call = long_call_matches.iloc[0]
 
         if float(short_put["strike"]) >= float(short_call["strike"]):
+            self._log_rejection(
+                "invalid_strike_order",
+                symbol,
+                expiry,
+                short_put=float(short_put["strike"]),
+                short_call=float(short_call["strike"]),
+            )
             return None, 0.0, 0.0
 
         credit_call = self._price(short_call, "bid") - self._price(long_call, "ask")
@@ -156,9 +226,23 @@ class IronCondorStrategy(BaseOptionStrategy):
         total_credit = credit_call + credit_put
 
         if total_credit < self.premium_threshold:
+            self._log_rejection(
+                "credit_below_threshold",
+                symbol,
+                expiry,
+                credit=total_credit,
+                threshold=self.premium_threshold,
+            )
             return None, 0.0, 0.0
         credit_pct = total_credit / underlying_price
         if credit_pct < self.min_credit_pct:
+            self._log_rejection(
+                "credit_pct_below_min",
+                symbol,
+                expiry,
+                credit_pct=credit_pct,
+                min_pct=self.min_credit_pct,
+            )
             return None, 0.0, 0.0
 
         rationale = (
@@ -207,3 +291,18 @@ class IronCondorStrategy(BaseOptionStrategy):
         if "symbol" not in df.columns and symbol is not None:
             df["symbol"] = symbol
         return df
+
+    def _log_rejection(
+        self,
+        reason: str,
+        symbol: Optional[str],
+        expiry: Optional[pd.Timestamp],
+        **metrics: Any,
+    ) -> None:
+        logger.debug(
+            "IronCondor filter | reason={reason} symbol={symbol} expiry={expiry} context={context}",
+            reason=reason,
+            symbol=symbol,
+            expiry=expiry.isoformat() if hasattr(expiry, "isoformat") else expiry,
+            context=metrics or None,
+        )
