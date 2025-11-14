@@ -26,10 +26,8 @@ ENV LANG=en_US.UTF-8 \
 COPY requirements.txt .
 
 # Install uv once and keep it on PATH
-ENV UV_INSTALL_DIR=/usr/local/bin
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
-    && mv /root/.cargo/bin/uv ${UV_INSTALL_DIR}/uv \
-    && rm -rf /root/.cargo
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
 
 # Install Python dependencies with uv
 RUN uv pip install --system -r requirements.txt
