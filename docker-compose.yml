@@ -50,7 +50,7 @@ services:
     ports:
       - "127.0.0.1:4001:4003"
       - "127.0.0.1:4002:4004"
-      - "127.0.0.1:5900:5900"
+      - "5900:5900"
   app:
       # Build your app from the Dockerfile in the current directory
       build: .
