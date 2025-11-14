@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List
 
@@ -76,7 +76,7 @@ class BacktestRunner:
                 }
             )
         df = pd.DataFrame(metrics_rows)
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         output_path = self.results_dir / f"backtest_{timestamp}.csv"
         df.to_csv(output_path, index=False)
         logger.info("Backtest metrics saved to {path}", path=str(output_path))

@@ -1,7 +1,7 @@
 """Vertical spread option strategy implementation."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from typing import Any, Iterable, List
 
 import pandas as pd
@@ -29,7 +29,7 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
                 continue
             expiry_candidates = sorted(chain["expiry"].unique())
             for expiry in expiry_candidates:
-                if (expiry - datetime.utcnow()).days < self.min_days_to_expiry:
+                if (expiry - datetime.now(timezone.utc)).days < self.min_days_to_expiry:
                     continue
                 subset = chain[chain["expiry"] == expiry]
                 atm = subset.iloc[(subset["strike"] - underlying_price).abs().argsort()[:1]].iloc[0]
@@ -83,7 +83,7 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
         if df.empty:
             return df
         if "expiry" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["expiry"]):
-            df["expiry"] = pd.to_datetime(df["expiry"])
+            df["expiry"] = pd.to_datetime(df["expiry"], utc=True)
         symbol = self._snapshot_value(snapshot, "symbol")
         if "symbol" not in df.columns and symbol is not None:
             df["symbol"] = symbol

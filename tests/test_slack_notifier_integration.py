@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -37,7 +37,7 @@ class SlackNotifierIntegrationTests(unittest.TestCase):
                     "action": "PING",
                     "option_type": "CALL",
                     "strike": 0,
-                    "expiry": datetime.utcnow().date(),
+                    "expiry": datetime.now(timezone.utc).date(),
                     "confidence": 1.0,
                     "explanation": "Integration test message.",
                 }

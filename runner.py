@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -77,7 +77,7 @@ async def run_once(
     ordered_columns = [col for col in preferred_order if col in df.columns]
     remaining_columns = [col for col in df.columns if col not in ordered_columns]
     df = df[ordered_columns + remaining_columns]
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     file_path = results_dir / f"signals_{timestamp}.csv"
     df.to_csv(file_path, index=False)
     logger.info("Saved {count} signals to {path}", count=len(df), path=str(file_path))

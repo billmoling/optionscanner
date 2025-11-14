@@ -1,7 +1,7 @@
 """Covered call strategy implementation."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable, List
 
 import pandas as pd
@@ -32,7 +32,7 @@ class CoveredCallStrategy(BaseOptionStrategy):
             if underlying_price is None or underlying_price <= 0:
                 continue
             for expiry, subset in chain.groupby("expiry"):
-                days_to_expiry = max((expiry - datetime.utcnow()).days, 1)
+                days_to_expiry = max((expiry - datetime.now(timezone.utc)).days, 1)
                 if days_to_expiry < self.min_days_to_expiry:
                     continue
                 otm_calls = subset[(subset["option_type"] == "CALL") & (subset["strike"] >= underlying_price * 1.05)]
@@ -76,7 +76,7 @@ class CoveredCallStrategy(BaseOptionStrategy):
         if df.empty:
             return df
         if "expiry" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["expiry"]):
-            df["expiry"] = pd.to_datetime(df["expiry"])
+            df["expiry"] = pd.to_datetime(df["expiry"], utc=True)
         symbol = self._snapshot_value(snapshot, "symbol")
         if "symbol" not in df.columns and symbol is not None:
             df["symbol"] = symbol

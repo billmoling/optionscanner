@@ -60,7 +60,7 @@ class OptionChainSnapshot:
         frame["symbol"] = self.symbol
         frame["underlying_price"] = self.underlying_price
         frame["timestamp"] = self.timestamp
-        frame["expiry"] = pd.to_datetime(frame["expiry"])
+        frame["expiry"] = pd.to_datetime(frame["expiry"], utc=True)
         return frame
 
 
@@ -230,7 +230,7 @@ class IBKRDataFetcher(BaseDataFetcher):
         return cleaned
 
     def _select_expiries(self, expirations: Sequence[str]) -> List[str]:
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         horizon = today + timedelta(days=self._expiry_horizon_days)
         in_window: List[Tuple[date, str]] = []
         fallback: List[Tuple[date, str]] = []
@@ -372,7 +372,7 @@ class IBKRDataFetcher(BaseDataFetcher):
         snapshot = OptionChainSnapshot(
             symbol=symbol,
             underlying_price=underlying_price,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             options=list(rows_by_conid.values()),
         )
         self._persist_snapshot(snapshot)

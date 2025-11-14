@@ -1,7 +1,7 @@
 """Iron condor strategy implementation."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import pandas as pd
@@ -49,7 +49,7 @@ class IronCondorStrategy(BaseOptionStrategy):
             expiry_groups = chain.groupby("expiry")
             processed_expiries = 0
             for expiry, subset in expiry_groups:
-                if (expiry - datetime.utcnow()).days < 21:
+                if (expiry - datetime.now(timezone.utc)).days < 21:
                     continue
                 if self.max_expiries_per_symbol and processed_expiries >= self.max_expiries_per_symbol:
                     break
@@ -202,7 +202,7 @@ class IronCondorStrategy(BaseOptionStrategy):
         if df.empty:
             return df
         if "expiry" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["expiry"]):
-            df["expiry"] = pd.to_datetime(df["expiry"])
+            df["expiry"] = pd.to_datetime(df["expiry"], utc=True)
         symbol = self._snapshot_value(snapshot, "symbol")
         if "symbol" not in df.columns and symbol is not None:
             df["symbol"] = symbol

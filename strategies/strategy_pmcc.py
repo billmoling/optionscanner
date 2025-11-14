@@ -1,7 +1,7 @@
 """Poor Man's Covered Call (PMCC) strategy implementation."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Tuple
 
 import pandas as pd
@@ -44,7 +44,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
         self.max_trade_ideas = max_trade_ideas
 
     def on_data(self, data: Iterable[Any]) -> List[TradeSignal]:
-        now = pd.Timestamp(datetime.utcnow())
+        now = pd.Timestamp(datetime.now(timezone.utc))
         signals: List[TradeSignal] = []
 
         for snapshot in data:
@@ -61,7 +61,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
             if not required_cols.issubset(prepared.columns):
                 continue
             prepared["option_type"] = prepared["option_type"].str.upper()
-            prepared["expiry"] = pd.to_datetime(prepared["expiry"])
+            prepared["expiry"] = pd.to_datetime(prepared["expiry"], utc=True)
             prepared["days_to_expiry"] = (prepared["expiry"] - now).dt.days
             for greek in ("delta", "theta", "implied_volatility"):
                 if greek in prepared.columns:
@@ -328,7 +328,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
         if df.empty:
             return df
         if "expiry" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["expiry"]):
-            df["expiry"] = pd.to_datetime(df["expiry"])
+            df["expiry"] = pd.to_datetime(df["expiry"], utc=True)
         symbol = self._snapshot_value(snapshot, "symbol")
         if "symbol" not in df.columns and symbol is not None:
             df["symbol"] = symbol

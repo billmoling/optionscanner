@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from strategies.strategy_covered_call import CoveredCallStrategy
 from strategies.strategy_iron_condor import IronCondorStrategy
@@ -17,7 +17,7 @@ def make_snapshot(underlying: float, options: list[dict]) -> dict:
 
 class CoveredCallStrategyTests(unittest.TestCase):
     def test_generates_signal_for_rich_premium(self) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expiry = now + timedelta(days=30)
         options = [
             {
@@ -41,7 +41,7 @@ class CoveredCallStrategyTests(unittest.TestCase):
 
 class VerticalSpreadStrategyTests(unittest.TestCase):
     def test_builds_bull_and_bear_spreads(self) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expiry = now + timedelta(days=40)
         options = [
             {"expiry": expiry, "strike": 100.0, "option_type": "CALL", "mark": 5.0, "theta": -0.02, "implied_volatility": 0.4},
@@ -61,7 +61,7 @@ class VerticalSpreadStrategyTests(unittest.TestCase):
 
 class IronCondorStrategyTests(unittest.TestCase):
     def test_identifies_credit_opportunity(self) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expiry = now + timedelta(days=35)
         call_strikes = [110.0, 115.0, 120.0]
         put_strikes = [80.0, 85.0, 90.0]
@@ -98,7 +98,7 @@ class IronCondorStrategyTests(unittest.TestCase):
 
 class PoorMansCoveredCallStrategyTests(unittest.TestCase):
     def test_pmcc_combines_leaps_and_short_call(self) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         leaps_expiry = now + timedelta(days=270)
         short_expiry = now + timedelta(days=35)
         options = [

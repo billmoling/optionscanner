@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
@@ -59,7 +59,7 @@ class PortfolioReporter:
         return "\n".join(lines)
 
     def write_csv(self, positions: pd.DataFrame, greek_summary: pd.DataFrame) -> Path:
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         path = self._results_dir / f"portfolio_summary_{timestamp}.csv"
         with path.open("w", encoding="utf-8", newline="") as fh:
             positions.to_csv(fh, index=False)
@@ -71,7 +71,7 @@ class PortfolioReporter:
     def log_details(self, message: str) -> Path:
         path = self._logs_dir / "portfolio_manager.log"
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(f"[{datetime.utcnow().isoformat()}] {message}\n")
+            fh.write(f"[{datetime.now(timezone.utc).isoformat()}] {message}\n")
         logger.debug("Appended portfolio summary to {path}", path=str(path))
         return path
 
