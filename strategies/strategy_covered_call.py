@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, List
 
 import pandas as pd
+from loguru import logger
 
 from .base import BaseOptionStrategy, TradeSignal
 
@@ -16,13 +17,18 @@ class CoveredCallStrategy(BaseOptionStrategy):
         self,
         min_days_to_expiry: int = 21,
         min_annualized_yield: float = 0.12,
+        enabled: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.min_days_to_expiry = min_days_to_expiry
         self.min_annualized_yield = min_annualized_yield
+        self.enabled = enabled
 
     def on_data(self, data: Iterable[Any]) -> List[TradeSignal]:
+        if not self.enabled:
+            logger.debug("CoveredCallStrategy disabled; skipping evaluation")
+            return []
         signals: List[TradeSignal] = []
         for snapshot in data:
             chain = self._to_dataframe(snapshot)

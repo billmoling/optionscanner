@@ -30,7 +30,7 @@ class CoveredCallStrategyTests(unittest.TestCase):
             },
         ]
         snapshot = make_snapshot(underlying=500.0, options=options)
-        strategy = CoveredCallStrategy()
+        strategy = CoveredCallStrategy(enabled=True)
 
         signals = strategy.on_data([snapshot])
 
