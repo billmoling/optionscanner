@@ -32,45 +32,62 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
                 if (expiry - datetime.now(timezone.utc)).days < self.min_days_to_expiry:
                     continue
                 subset = chain[chain["expiry"] == expiry]
-                atm = subset.iloc[(subset["strike"] - underlying_price).abs().argsort()[:1]].iloc[0]
-                otm = subset[(subset["strike"] >= atm["strike"] + self.spread_width) & (subset["option_type"] == "CALL")]
-                if not otm.empty:
-                    selected = otm.iloc[0]
-                    rationale = (
-                        f"Bull call spread targeting IV {atm['implied_volatility']:.2%} -> "
-                        f"{selected['implied_volatility']:.2%}"
-                    )
-                    signals.append(
-                        self.emit_signal(
-                            TradeSignal(
-                                symbol=subset["symbol"].iloc[0],
-                                expiry=expiry,
-                                strike=float(selected["strike"]),
-                                option_type="CALL",
-                                direction="LONG_SPREAD",
-                                rationale=rationale,
+                call_subset = subset[subset["option_type"] == "CALL"].sort_values("strike")
+                put_subset = subset[subset["option_type"] == "PUT"].sort_values("strike")
+
+                if not call_subset.empty:
+                    atm_call = call_subset.iloc[
+                        (call_subset["strike"] - underlying_price).abs().argsort()[:1]
+                    ].iloc[0]
+                    otm_calls = call_subset[
+                        call_subset["strike"] >= atm_call["strike"] + self.spread_width
+                    ].sort_values("strike")
+                    if not otm_calls.empty:
+                        short_call = otm_calls.iloc[0]
+                        rationale = (
+                            "Bull call debit spread: long "
+                            f"{atm_call['strike']:.2f}C IV {atm_call['implied_volatility']:.2%}, short "
+                            f"{short_call['strike']:.2f}C IV {short_call['implied_volatility']:.2%}"
+                        )
+                        signals.append(
+                            self.emit_signal(
+                                TradeSignal(
+                                    symbol=subset["symbol"].iloc[0],
+                                    expiry=expiry,
+                                    strike=float(short_call["strike"]),
+                                    option_type="CALL",
+                                    direction="BULL_CALL_DEBIT_SPREAD",
+                                    rationale=rationale,
+                                )
                             )
                         )
-                    )
-                put_subset = subset[subset["option_type"] == "PUT"]
-                otm_puts = put_subset[put_subset["strike"] <= atm["strike"] - self.spread_width]
-                if not otm_puts.empty:
-                    selected = otm_puts.iloc[-1]
-                    rationale = (
-                        f"Bear put spread for downside hedge with theta {selected['theta']:.4f}"
-                    )
-                    signals.append(
-                        self.emit_signal(
-                            TradeSignal(
-                                symbol=subset["symbol"].iloc[0],
-                                expiry=expiry,
-                                strike=float(selected["strike"]),
-                                option_type="PUT",
-                                direction="LONG_SPREAD",
-                                rationale=rationale,
+
+                if not put_subset.empty:
+                    atm_put = put_subset.iloc[
+                        (put_subset["strike"] - underlying_price).abs().argsort()[:1]
+                    ].iloc[0]
+                    otm_puts = put_subset[
+                        put_subset["strike"] <= atm_put["strike"] - self.spread_width
+                    ].sort_values("strike", ascending=False)
+                    if not otm_puts.empty:
+                        short_put = otm_puts.iloc[0]
+                        rationale = (
+                            "Bear put debit spread: long "
+                            f"{atm_put['strike']:.2f}P theta {atm_put['theta']:.4f}, short "
+                            f"{short_put['strike']:.2f}P theta {short_put['theta']:.4f}"
+                        )
+                        signals.append(
+                            self.emit_signal(
+                                TradeSignal(
+                                    symbol=subset["symbol"].iloc[0],
+                                    expiry=expiry,
+                                    strike=float(short_put["strike"]),
+                                    option_type="PUT",
+                                    direction="BEAR_PUT_DEBIT_SPREAD",
+                                    rationale=rationale,
+                                )
                             )
                         )
-                    )
         return signals
 
     def _to_dataframe(self, snapshot: Any) -> pd.DataFrame:
