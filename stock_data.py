@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
@@ -37,6 +38,7 @@ class StockDataFetcher:
         market_data_type: str = "FROZEN",
         exchange: str = "SMART",
         currency: str = "USD",
+        history_dir: Optional[Path] = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -51,6 +53,9 @@ class StockDataFetcher:
         self._lock = asyncio.Lock()
         self._market_data_type_code = MARKET_DATA_TYPES[market_data_type]
         self._connected = False
+        default_history = Path("historydata") / "stock_prices"
+        self.history_dir = Path(history_dir) if history_dir else default_history
+        self.history_dir.mkdir(parents=True, exist_ok=True)
 
     async def connect(self) -> None:
         """Establish a connection to IBKR if not already connected."""
@@ -95,6 +100,9 @@ class StockDataFetcher:
         frame = self._bars_to_frame(symbol, bars)
         if frame.empty:
             logger.warning("No historical data returned | symbol={symbol}", symbol=symbol)
+            return frame
+
+        self._persist_history(symbol, frame)
         return frame
 
     async def fetch_history_many(self, symbols: Iterable[str], **kwargs: Any) -> Dict[str, pd.DataFrame]:
@@ -134,6 +142,28 @@ class StockDataFetcher:
             )
         frame = pd.DataFrame(rows)
         return frame
+
+    def _persist_history(self, symbol: str, frame: pd.DataFrame) -> None:
+        if frame.empty:
+            return
+        snapshot_time = datetime.utcnow()
+        timestamp_str = snapshot_time.strftime("%Y%m%d_%H%M%S")
+        symbol_upper = symbol.upper()
+        parquet_path = self.history_dir / f"{symbol_upper}_{timestamp_str}.parquet"
+        try:
+            frame.to_parquet(parquet_path, index=False)
+            logger.info("Saved stock history snapshot | symbol={symbol} path={path}", symbol=symbol, path=parquet_path)
+        except Exception:
+            logger.exception("Unable to persist parquet snapshot for {symbol}", symbol=symbol)
+        csv_path = self.history_dir / f"{snapshot_time.strftime('%Y%m%d')}_stocks.csv"
+        copy = frame.copy()
+        copy["snapshot_time"] = snapshot_time.replace(microsecond=0).isoformat()
+        header = not csv_path.exists()
+        try:
+            copy.to_csv(csv_path, mode="a", header=header, index=False)
+            logger.info("Appended stock history snapshot | symbol={symbol} path={path}", symbol=symbol, path=csv_path)
+        except Exception:
+            logger.exception("Unable to append stock history to CSV for {symbol}", symbol=symbol)
 
 
 __all__ = ["StockDataFetcher", "HistoricalDataRequest"]

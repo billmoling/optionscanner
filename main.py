@@ -21,6 +21,8 @@ from option_data import IBKRDataFetcher, MARKET_DATA_TYPE_CODES
 from portfolio.manager import PortfolioManager
 from runner import run_once, run_scheduler
 from strategies.base import BaseOptionStrategy
+from stock_data import StockDataFetcher
+from technical_indicators import TechnicalIndicatorProcessor
 
 
 class RunMode(str, Enum):
@@ -153,6 +155,45 @@ def main(argv: Optional[List[str]] = None) -> None:
         market_data_type=args.market_data,
     )
 
+    stock_fetcher: Optional[StockDataFetcher] = None
+    indicator_processor: Optional[TechnicalIndicatorProcessor] = None
+    stock_history_kwargs: Dict[str, Any] = {}
+    stock_data_settings = config.get("stock_data") or {}
+    if stock_data_settings.get("enabled"):
+        stock_host = stock_data_settings.get("host", host)
+        stock_port = int(stock_data_settings.get("port", port))
+        base_client_id = int(client_id)
+        stock_client_id = stock_data_settings.get("client_id")
+        if stock_client_id is None:
+            client_id_offset = int(stock_data_settings.get("client_id_offset", 50))
+            stock_client_id = base_client_id + client_id_offset
+        history_dir_setting = stock_data_settings.get("history_dir")
+        stock_fetcher = StockDataFetcher(
+            host=stock_host,
+            port=stock_port,
+            client_id=int(stock_client_id),
+            market_data_type=stock_data_settings.get("market_data_type", args.market_data),
+            exchange=stock_data_settings.get("exchange", "SMART"),
+            currency=stock_data_settings.get("currency", "USD"),
+            history_dir=Path(history_dir_setting) if history_dir_setting else None,
+        )
+        indicator_processor = TechnicalIndicatorProcessor()
+        extra_periods = stock_data_settings.get("extra_ma_periods") or []
+        for period in extra_periods:
+            try:
+                period_int = int(period)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Skipping invalid MA period '{period}' in stock_data.extra_ma_periods",
+                    period=period,
+                )
+                continue
+            indicator_processor.register(
+                f"ma{period_int}",
+                TechnicalIndicatorProcessor.simple_moving_average(period_int),
+            )
+        stock_history_kwargs = stock_data_settings.get("history_request") or {}
+
     if portfolio_only and disable_portfolio_manager:
         logger.info(
             "--portfolio-only specified; ignoring DISABLE_PORTFOLIO_MANAGER environment override."
@@ -195,6 +236,9 @@ def main(argv: Optional[List[str]] = None) -> None:
                     validation_agent=validation_agent,
                     slack_notifier=slack_notifier,
                     enable_gemini=enable_gemini,
+                    stock_fetcher=stock_fetcher,
+                    indicator_processor=indicator_processor,
+                    stock_history_kwargs=stock_history_kwargs,
                 )
             )
             maybe_run_portfolio_manager(fetcher)
@@ -212,6 +256,9 @@ def main(argv: Optional[List[str]] = None) -> None:
                 results_dir,
                 slack_notifier,
                 enable_gemini=enable_gemini,
+                stock_fetcher=stock_fetcher,
+                indicator_processor=indicator_processor,
+                stock_history_kwargs=stock_history_kwargs,
                 post_run=lambda: maybe_run_portfolio_manager(fetcher),
             )
         )

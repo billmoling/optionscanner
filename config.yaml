@@ -15,6 +15,17 @@ tickers:
 log_dir: "./logs"
 data_dir: "./data"
 enable_gemini: false
+stock_data:
+  enabled: true
+  client_id_offset: 25
+  history_dir: "./historydata/stock_prices"
+  extra_ma_periods:
+    - 50
+  history_request:
+    duration: "180 D"
+    bar_size: "1 day"
+    what_to_show: "ADJUSTED_LAST"
+    use_rth: true
 schedule:
   times:
     - "06:30"

@@ -14,6 +14,9 @@ from zoneinfo import ZoneInfo
 from ai_agents import SignalExplainAgent, SignalValidationAgent
 from notifications import SlackNotifier
 from option_data import BaseDataFetcher, OptionChainSnapshot
+from stock_data import StockDataFetcher
+from technical_indicators import TechnicalIndicatorProcessor
+from market_state import DictMarketStateProvider, MarketStateClassifier, MarketStateResult
 from scheduling import compute_next_run, parse_schedule_times
 from strategies.base import BaseOptionStrategy, TradeSignal
 
@@ -28,8 +31,44 @@ async def run_once(
     validation_agent: Optional[SignalValidationAgent] = None,
     slack_notifier: Optional[SlackNotifier] = None,
     enable_gemini: bool = True,
+    stock_fetcher: Optional[StockDataFetcher] = None,
+    indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
+    stock_history_kwargs: Optional[Dict[str, Any]] = None,
 ) -> None:
-    snapshots = await fetcher.fetch_all(symbols)
+    symbol_list = list(symbols)
+    underlying_context: Dict[str, Dict[str, Any]] = {}
+    market_state_results: Dict[str, MarketStateResult] = {}
+    if stock_fetcher is not None:
+        underlying_context, market_state_results = await _fetch_underlying_context(
+            stock_fetcher,
+            symbol_list,
+            indicator_processor=indicator_processor,
+            history_kwargs=stock_history_kwargs or {},
+        )
+    snapshots = await fetcher.fetch_all(symbol_list)
+    if underlying_context:
+        for snapshot in snapshots:
+            context = underlying_context.get(snapshot.symbol.upper())
+            if context:
+                if snapshot.context is None:
+                    snapshot.context = {}
+                snapshot.context.update(context)
+                state_result = market_state_results.get(snapshot.symbol.upper())
+                if state_result:
+                    snapshot.context.setdefault("market_state", state_result.state.value)
+                    snapshot.context.setdefault("market_state_as_of", state_result.as_of.isoformat())
+    state_provider = None
+    if market_state_results:
+        state_provider = DictMarketStateProvider(
+            {symbol: result.state for symbol, result in market_state_results.items()}
+        )
+        logger.info(
+            "Market state provider initialized | symbols={symbols}",
+            symbols=",".join(sorted(market_state_results.keys())),
+        )
+        for strategy in strategies:
+            if hasattr(strategy, "market_state_provider"):
+                strategy.market_state_provider = state_provider
     aggregated_signals: List[Tuple[str, TradeSignal]] = []
     for strategy in strategies:
         try:
@@ -87,6 +126,67 @@ async def run_once(
         await loop.run_in_executor(None, slack_notifier.send_signals, df, file_path)
 
 
+async def _fetch_underlying_context(
+    stock_fetcher: StockDataFetcher,
+    symbols: Sequence[str],
+    *,
+    indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
+    history_kwargs: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, MarketStateResult]]:
+    history_kwargs = history_kwargs or {}
+    try:
+        histories = await stock_fetcher.fetch_history_many(symbols, **history_kwargs)
+    except Exception:
+        logger.exception("Failed to download underlying stock history")
+        return {}, {}
+
+    processor = indicator_processor or TechnicalIndicatorProcessor()
+    processor.ensure_default_moving_averages()
+    classifier = MarketStateClassifier()
+    context: Dict[str, Dict[str, Any]] = {}
+    state_results: Dict[str, MarketStateResult] = {}
+
+    for symbol, history in histories.items():
+        if history is None or history.empty:
+            continue
+        try:
+            enriched = processor.process(history)
+        except Exception:
+            logger.exception("Failed to compute indicators for {symbol}", symbol=symbol)
+            continue
+        enriched = enriched.dropna(subset=["close"])
+        if enriched.empty:
+            continue
+        latest = enriched.iloc[-1]
+        metrics: Dict[str, Any] = {}
+        close_value = latest.get("close")
+        if pd.notna(close_value):
+            metrics["close"] = float(close_value)
+        for column in ("ma5", "ma10", "ma30", "ma50"):
+            value = latest.get(column)
+            if pd.notna(value):
+                metrics[column] = float(value)
+                if column == "ma30":
+                    metrics["moving_average_30"] = float(value)
+                elif column == "ma50":
+                    metrics["moving_average_50"] = float(value)
+        timestamp_value = latest.get("timestamp")
+        if pd.notna(timestamp_value):
+            timestamp = pd.to_datetime(timestamp_value, utc=True)
+            metrics["indicator_timestamp"] = timestamp.isoformat()
+
+        state_result = classifier.classify(enriched, symbol=symbol)
+        if state_result:
+            state_results[symbol.upper()] = state_result
+            metrics["market_state"] = state_result.state.value
+            metrics["market_state_as_of"] = state_result.as_of.isoformat()
+
+        if not metrics:
+            continue
+        context[symbol.upper()] = metrics
+    return context, state_results
+
+
 async def run_scheduler(
     config: Dict[str, Any],
     fetcher: BaseDataFetcher,
@@ -96,6 +196,9 @@ async def run_scheduler(
     slack_notifier: Optional[SlackNotifier],
     *,
     enable_gemini: bool = True,
+    stock_fetcher: Optional[StockDataFetcher] = None,
+    indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
+    stock_history_kwargs: Optional[Dict[str, Any]] = None,
     post_run: Optional[Callable[[], None]] = None,
 ) -> None:
     schedule_config = config.get("schedule", {})
@@ -139,6 +242,9 @@ async def run_scheduler(
                 validation_agent=validation_agent,
                 slack_notifier=slack_notifier,
                 enable_gemini=enable_gemini,
+                stock_fetcher=stock_fetcher,
+                indicator_processor=indicator_processor,
+                stock_history_kwargs=stock_history_kwargs,
             )
             if post_run is not None:
                 try:

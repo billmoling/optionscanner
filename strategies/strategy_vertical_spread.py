@@ -41,6 +41,11 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
             expiry_candidates = sorted(chain["expiry"].unique())
             symbol = str(chain["symbol"].iloc[0]) if "symbol" in chain.columns else None
             state = self._get_market_state(symbol)
+            logger.info(
+                "Evaluating vertical spreads | symbol={symbol} market_state={state}",
+                symbol=symbol,
+                state=state.value if state else "unknown",
+            )
             for expiry in expiry_candidates:
                 if (expiry - datetime.now(timezone.utc)).days < self.min_days_to_expiry:
                     continue
@@ -107,7 +112,13 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
         if not symbol or not self.market_state_provider:
             return None
         try:
-            return self.market_state_provider.get_state(symbol)
+            state = self.market_state_provider.get_state(symbol)
+            logger.info(
+                "Market state fetched | symbol={symbol} state={state}",
+                symbol=symbol,
+                state=state.value if state else "unknown",
+            )
+            return state
         except Exception:
             logger.exception("Failed to obtain market state | symbol={symbol}", symbol=symbol)
             return None
@@ -121,12 +132,18 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
         if state is None:
             return True
         if state == required:
+            logger.info(
+                "Market state filter passed | symbol={symbol} state={state} required={required}",
+                symbol=symbol,
+                state=state.value,
+                required=required.value,
+            )
             return True
-        logger.debug(
+        logger.info(
             "Skipping spread due to market state | symbol={symbol} state={state} required={required}",
             symbol=symbol,
-            state=state,
-            required=required,
+            state=state.value,
+            required=required.value,
         )
         return False
 

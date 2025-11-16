@@ -52,6 +52,7 @@ class OptionChainSnapshot:
     underlying_price: float
     timestamp: datetime
     options: List[Dict[str, Any]]
+    context: Optional[Dict[str, Any]] = None
 
     def to_pandas(self) -> pd.DataFrame:
         frame = pd.DataFrame(self.options)
@@ -61,6 +62,9 @@ class OptionChainSnapshot:
         frame["underlying_price"] = self.underlying_price
         frame["timestamp"] = self.timestamp
         frame["expiry"] = pd.to_datetime(frame["expiry"], utc=True)
+        if self.context:
+            for key, value in self.context.items():
+                frame[key] = value
         return frame
 
 

@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any, Dict, Iterable, Optional, Protocol
 
 import pandas as pd
+from loguru import logger
 
 from technical_indicators import TechnicalIndicatorProcessor
 from stock_data import StockDataFetcher
@@ -65,7 +66,18 @@ class MarketStateClassifier:
         else:
             timestamp = timestamp.tz_convert("UTC")
         resolved_symbol = symbol or str(latest.get("symbol", ""))
-        return MarketStateResult(symbol=resolved_symbol, state=state, as_of=timestamp, close=close)
+        result = MarketStateResult(symbol=resolved_symbol, state=state, as_of=timestamp, close=close)
+        logger.info(
+            "Market state classified | symbol={symbol} state={state} close={close:.2f} ma5={ma5:.2f} ma10={ma10:.2f} ma30={ma30:.2f} timestamp={timestamp}",
+            symbol=result.symbol,
+            state=result.state.value,
+            close=close,
+            ma5=ma5,
+            ma10=ma10,
+            ma30=ma30,
+            timestamp=timestamp.isoformat(),
+        )
+        return result
 
 
 class DictMarketStateProvider(MarketStateProvider):
@@ -100,11 +112,20 @@ class StockMarketStateProvider(MarketStateProvider):
 
         results: Dict[str, Optional[MarketStateResult]] = {}
         for symbol in symbols:
+            logger.info("Refreshing market state | symbol={symbol}", symbol=symbol)
             history = await self._fetcher.fetch_history(symbol, **history_kwargs)
             enriched = self._processor.process(history)
             result = self._classifier.classify(enriched, symbol=symbol)
             if result:
                 self._cache[symbol.upper()] = result
+                logger.info(
+                    "Updated market state cache | symbol={symbol} state={state} as_of={as_of}",
+                    symbol=result.symbol,
+                    state=result.state.value,
+                    as_of=result.as_of.isoformat(),
+                )
+            else:
+                logger.warning("Unable to classify market state | symbol={symbol}", symbol=symbol)
             results[symbol] = result
         return results
 
