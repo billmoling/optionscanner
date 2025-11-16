@@ -1,7 +1,9 @@
 import os
 
+import pytest
 from dotenv import load_dotenv
 
+pytest.importorskip("google.genai", reason="google generative AI client not installed")
 from google import genai
 
 load_dotenv()
