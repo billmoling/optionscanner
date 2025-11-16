@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Iterable, List
+from typing import Any, Iterable, List, Optional
 
 import pandas as pd
+
+from loguru import logger
+
+from market_state import MarketState, MarketStateProvider
 
 from .base import BaseOptionStrategy, TradeSignal
 
@@ -12,10 +16,17 @@ from .base import BaseOptionStrategy, TradeSignal
 class VerticalSpreadStrategy(BaseOptionStrategy):
     """Constructs bullish or bearish vertical spreads based on IV skew."""
 
-    def __init__(self, spread_width: float = 5.0, min_days_to_expiry: int = 14, **kwargs) -> None:
+    def __init__(
+        self,
+        spread_width: float = 5.0,
+        min_days_to_expiry: int = 14,
+        market_state_provider: Optional[MarketStateProvider] = None,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self.spread_width = spread_width
         self.min_days_to_expiry = min_days_to_expiry
+        self.market_state_provider = market_state_provider
 
     def on_data(self, data: Iterable[Any]) -> List[TradeSignal]:
         signals: List[TradeSignal] = []
@@ -28,6 +39,8 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
             if underlying_price is None:
                 continue
             expiry_candidates = sorted(chain["expiry"].unique())
+            symbol = str(chain["symbol"].iloc[0]) if "symbol" in chain.columns else None
+            state = self._get_market_state(symbol)
             for expiry in expiry_candidates:
                 if (expiry - datetime.now(timezone.utc)).days < self.min_days_to_expiry:
                     continue
@@ -35,7 +48,7 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
                 call_subset = subset[subset["option_type"] == "CALL"].sort_values("strike")
                 put_subset = subset[subset["option_type"] == "PUT"].sort_values("strike")
 
-                if not call_subset.empty:
+                if not call_subset.empty and self._state_allows(symbol, state, MarketState.BULL):
                     atm_call = call_subset.iloc[
                         (call_subset["strike"] - underlying_price).abs().argsort()[:1]
                     ].iloc[0]
@@ -62,7 +75,7 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
                             )
                         )
 
-                if not put_subset.empty:
+                if not put_subset.empty and self._state_allows(symbol, state, MarketState.BEAR):
                     atm_put = put_subset.iloc[
                         (put_subset["strike"] - underlying_price).abs().argsort()[:1]
                     ].iloc[0]
@@ -89,6 +102,33 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
                             )
                         )
         return signals
+
+    def _get_market_state(self, symbol: Optional[str]) -> Optional[MarketState]:
+        if not symbol or not self.market_state_provider:
+            return None
+        try:
+            return self.market_state_provider.get_state(symbol)
+        except Exception:
+            logger.exception("Failed to obtain market state | symbol={symbol}", symbol=symbol)
+            return None
+
+    @staticmethod
+    def _state_allows(
+        symbol: Optional[str],
+        state: Optional[MarketState],
+        required: MarketState,
+    ) -> bool:
+        if state is None:
+            return True
+        if state == required:
+            return True
+        logger.debug(
+            "Skipping spread due to market state | symbol={symbol} state={state} required={required}",
+            symbol=symbol,
+            state=state,
+            required=required,
+        )
+        return False
 
     def _to_dataframe(self, snapshot: Any) -> pd.DataFrame:
         if isinstance(snapshot, pd.DataFrame):
