@@ -6,6 +6,7 @@ from market_state import MarketState, MarketStateProvider
 from strategies.strategy_covered_call import CoveredCallStrategy
 from strategies.strategy_iron_condor import IronCondorStrategy
 from strategies.strategy_pmcc import PoorMansCoveredCallStrategy
+from strategies.strategy_put_credit_spread import PutCreditSpreadStrategy
 from strategies.strategy_vertical_spread import VerticalSpreadStrategy
 
 
@@ -82,6 +83,26 @@ class VerticalSpreadStrategyTests(unittest.TestCase):
             spread_width=5.0,
             min_days_to_expiry=10,
             market_state_provider=_StaticStateProvider(MarketState.BULL),
+        )
+
+        signals = strategy.on_data([snapshot])
+
+        self.assertTrue(signals)
+        self.assertTrue(all(signal.option_type == "CALL" for signal in signals))
+
+    def test_allows_uptrend_state_for_bullish_spreads(self) -> None:
+        now = datetime.now(timezone.utc)
+        expiry = now + timedelta(days=30)
+        options = [
+            {"expiry": expiry, "strike": 100.0, "option_type": "CALL", "mark": 5.0, "theta": -0.02, "implied_volatility": 0.4},
+            {"expiry": expiry, "strike": 105.0, "option_type": "CALL", "mark": 3.0, "theta": -0.015, "implied_volatility": 0.45},
+            {"expiry": expiry, "strike": 95.0, "option_type": "PUT", "mark": 4.5, "theta": -0.01, "implied_volatility": 0.5},
+        ]
+        snapshot = make_snapshot(underlying=100.0, options=options)
+        strategy = VerticalSpreadStrategy(
+            spread_width=5.0,
+            min_days_to_expiry=10,
+            market_state_provider=_StaticStateProvider(MarketState.UPTREND),
         )
 
         signals = strategy.on_data([snapshot])
@@ -204,6 +225,48 @@ class PoorMansCoveredCallStrategyTests(unittest.TestCase):
         self.assertEqual(len(signals), 2)
         directions = {signal.direction for signal in signals}
         self.assertSetEqual(directions, {"LONG_PMCC_LEAPS", "SHORT_PMCC_CALL"})
+
+
+class PutCreditSpreadStrategyTests(unittest.TestCase):
+    def test_emits_signal_in_uptrend(self) -> None:
+        now = datetime.now(timezone.utc)
+        expiry = now + timedelta(days=25)
+        options = [
+            {"expiry": expiry, "strike": 95.0, "option_type": "PUT", "bid": 2.5, "ask": 2.6, "delta": -0.25},
+            {"expiry": expiry, "strike": 90.0, "option_type": "PUT", "bid": 1.2, "ask": 1.25, "delta": -0.18},
+            {"expiry": expiry, "strike": 85.0, "option_type": "PUT", "bid": 0.5, "ask": 0.55, "delta": -0.1},
+        ]
+        snapshot = make_snapshot(underlying=100.0, options=options)
+        strategy = PutCreditSpreadStrategy(
+            spread_width=5.0,
+            min_credit=0.5,
+            market_state_provider=_StaticStateProvider(MarketState.UPTREND),
+        )
+
+        signals = strategy.on_data([snapshot])
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].option_type, "PUT")
+        self.assertEqual(signals[0].direction, "BULL_PUT_CREDIT_SPREAD")
+
+    def test_respects_market_state_filter(self) -> None:
+        now = datetime.now(timezone.utc)
+        expiry = now + timedelta(days=25)
+        options = [
+            {"expiry": expiry, "strike": 95.0, "option_type": "PUT", "bid": 2.5, "ask": 2.6, "delta": -0.25},
+            {"expiry": expiry, "strike": 90.0, "option_type": "PUT", "bid": 1.2, "ask": 1.25, "delta": -0.18},
+            {"expiry": expiry, "strike": 85.0, "option_type": "PUT", "bid": 0.5, "ask": 0.55, "delta": -0.1},
+        ]
+        snapshot = make_snapshot(underlying=100.0, options=options)
+        strategy = PutCreditSpreadStrategy(
+            spread_width=5.0,
+            min_credit=0.5,
+            market_state_provider=_StaticStateProvider(MarketState.BEAR),
+        )
+
+        signals = strategy.on_data([snapshot])
+
+        self.assertFalse(signals)
 
 
 if __name__ == "__main__":

@@ -105,6 +105,40 @@ enable_gemini: false
 
 When the flag is `false`, the scanner skips Google Gemini requests altogether—no explanation or validation text is generated, and those columns are omitted from the CSV/Slack output—while continuing to export strategy results and Slack notifications.
 
+## Strategy overrides in `config.yaml`
+
+All classes in `strategies/strategy_*.py` are auto-discovered, but you can now tune or disable them directly from `config.yaml` via the `strategies` block. Each key can be the class name (`PutCreditSpreadStrategy`) or the camel-cased variant (`put_credit_spread_strategy`). Set `enabled: false` to skip a strategy entirely or provide a `params` mapping to override constructor arguments. For example, to target a credit-heavy, large-cap universe in mild uptrends:
+
+```yaml
+strategies:
+  PutCreditSpreadStrategy:
+    params:
+      min_days_to_expiry: 18
+      max_days_to_expiry: 38
+      spread_width: 5.0
+      min_credit: 0.6
+      short_target_delta: 0.23
+      short_otm_pct: 0.04
+  VerticalSpreadStrategy:
+    params:
+      max_iv_rank: 0.30
+      min_risk_reward_ratio: 1.1
+      target_days_to_expiry: 35
+  IronCondorStrategy:
+    params:
+      allowed_symbols: ["SPY", "QQQ", "IWM", "NVDA"]
+      spread_width: 10.0
+  CoveredCallStrategy:
+    params:
+      enabled: true        # strategy-level switch inside the class
+      min_annualized_yield: 0.15
+  PoorMansCoveredCallStrategy:
+    params:
+      max_trade_ideas: 3
+```
+
+Set `enabled: false` at the top level (next to `params`) to skip instantiating a strategy entirely, and use the nested `params.enabled` knob for classes such as `CoveredCallStrategy` that internally gate their execution. During `main.py` start-up the overrides are applied before `run_once` executes, so the scheduled runner and the portfolio workflow see the updated configuration automatically.
+
 ## Running tests
 
 The project ships with focused unit tests for AI agents, strategy logic, and Slack notifications. Execute the full suite with:

@@ -6,9 +6,10 @@ import asyncio
 import importlib
 import os
 import pkgutil
+import re
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import yaml
 from loguru import logger
@@ -37,9 +38,10 @@ def load_config(path: Path) -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def discover_strategies() -> List[BaseOptionStrategy]:
+def discover_strategies(overrides: Optional[Dict[str, Any]] = None) -> List[BaseOptionStrategy]:
     strategy_dir = Path(__file__).parent / "strategies"
     strategies: List[BaseOptionStrategy] = []
+    overrides = overrides or {}
     for module_info in pkgutil.iter_modules([str(strategy_dir)]):
         if not module_info.name.startswith("strategy_"):
             continue
@@ -51,8 +53,16 @@ def discover_strategies() -> List[BaseOptionStrategy]:
                 and issubclass(obj, BaseOptionStrategy)
                 and obj is not BaseOptionStrategy
             ):
+                config = _resolve_strategy_config(overrides, obj.__name__)
+                if config is not None and not bool(config.get("enabled", True)):
+                    logger.info(
+                        "Skipping disabled strategy {name}",
+                        name=obj.__name__,
+                    )
+                    continue
+                kwargs = _extract_strategy_params(config)
                 try:
-                    strategies.append(obj())
+                    strategies.append(obj(**kwargs))
                 except TypeError as exc:
                     logger.error(
                         "Failed to instantiate strategy {name}: {error}",
@@ -61,6 +71,35 @@ def discover_strategies() -> List[BaseOptionStrategy]:
                     )
     logger.info("Loaded {count} strategies", count=len(strategies))
     return strategies
+
+
+def _resolve_strategy_config(overrides: Dict[str, Any], class_name: str) -> Optional[Dict[str, Any]]:
+    if not overrides:
+        return None
+    direct = overrides.get(class_name)
+    if isinstance(direct, Mapping):
+        return dict(direct)
+    slug = _camel_to_snake(class_name)
+    alt = overrides.get(slug)
+    if isinstance(alt, Mapping):
+        return dict(alt)
+    return None
+
+
+def _extract_strategy_params(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not config:
+        return {}
+    params = config.get("params")
+    if isinstance(params, Mapping):
+        return dict(params)
+    return {k: v for k, v in config.items() if k != "enabled"}
+
+
+_CAMEL_RE = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _camel_to_snake(name: str) -> str:
+    return _CAMEL_RE.sub("_", name).lower()
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -127,8 +166,9 @@ def main(argv: Optional[List[str]] = None) -> None:
     results_dir = Path(config.get("results_dir", "./results"))
     slack_notifier = SlackNotifier(config.get("slack"))
     strategies: List[BaseOptionStrategy] = []
+    strategy_overrides = config.get("strategies")
     if not portfolio_only:
-        strategies = discover_strategies()
+        strategies = discover_strategies(strategy_overrides)
     symbols: Sequence[str] = config.get("tickers", [])
     run_mode = RunMode(args.run_mode)
     data_dir = Path(config.get("data_dir", "./data"))

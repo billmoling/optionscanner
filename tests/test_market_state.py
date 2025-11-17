@@ -35,6 +35,22 @@ class MarketStateClassifierTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.state, MarketState.BEAR)
 
+    def test_flags_uptrend_when_price_above_ma30_only(self) -> None:
+        history = pd.DataFrame(
+            {
+                "timestamp": [pd.Timestamp("2024-02-01", tz="UTC")],
+                "close": [103.0],
+                "ma5": [105.0],
+                "ma10": [104.0],
+                "ma30": [100.0],
+            }
+        )
+
+        result = self.classifier.classify(history, symbol="NVDA")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.state, MarketState.UPTREND)
+
     def test_processor_adds_expected_columns(self) -> None:
         history = self._make_history([100 + i for i in range(35)])
         enriched = self.processor.process(history)

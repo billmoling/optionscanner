@@ -26,6 +26,57 @@ stock_data:
     bar_size: "1 day"
     what_to_show: "ADJUSTED_LAST"
     use_rth: true
+strategies:
+  PutCreditSpreadStrategy:
+    params:
+      min_days_to_expiry: 18
+      max_days_to_expiry: 38
+      spread_width: 5.0
+      min_credit: 0.6
+      short_target_delta: 0.23
+      short_otm_pct: 0.04
+  VerticalSpreadStrategy:
+    params:
+      spread_width: 5.0
+      min_days_to_expiry: 14
+      max_days_to_expiry: 45
+      target_days_to_expiry: 35
+      max_iv_rank: 0.3
+      min_risk_reward_ratio: 1.1
+      bearish_iv_rank_trigger: 0.5
+  CoveredCallStrategy:
+    params:
+      min_days_to_expiry: 21
+      min_annualized_yield: 0.12
+      enabled: false
+  IronCondorStrategy:
+    params:
+      target_delta: 0.16
+      premium_threshold: 1.0
+      min_credit_pct: 0.01
+      max_expiries_per_symbol: 3
+      delta_tolerance: 0.05
+      spread_width: 10.0
+      allowed_symbols:
+        - SPY
+        - QQQ
+        - IWM
+  PoorMansCoveredCallStrategy:
+    params:
+      leaps_min_days: 240
+      leaps_delta_threshold: 0.7
+      leaps_max_strike_pct: 0.9
+      max_leaps_extrinsic_pct: 0.35
+      leaps_max_theta_abs: 0.04
+      short_min_days: 21
+      short_max_days: 60
+      short_otm_pct: 0.05
+      short_delta_range:
+        - 0.2
+        - 0.45
+      short_min_theta_abs: 0.04
+      min_return_on_capital: 0.08
+      max_trade_ideas: 5
 schedule:
   times:
     - "06:30"

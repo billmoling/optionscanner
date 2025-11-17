@@ -16,6 +16,7 @@ class MarketState(str, Enum):
     """Enumeration of supported market states."""
 
     BULL = "bull"
+    UPTREND = "uptrend"
     BEAR = "bear"
 
 
@@ -55,6 +56,8 @@ class MarketStateClassifier:
         ma30 = float(latest["ma30"])
         if close > ma5 > ma10 > ma30:
             state = MarketState.BULL
+        elif close > ma30 and ma5 > ma10 > ma30:
+            state = MarketState.UPTREND
         else:
             state = MarketState.BEAR
         timestamp_value = latest.get("timestamp")

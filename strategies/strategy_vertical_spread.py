@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Optional, Sequence, Tuple, Union
 
 import pandas as pd
 from loguru import logger
@@ -94,7 +94,7 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
             if (
                 directional.is_bullish
                 and not call_subset.empty
-                and self._state_allows(symbol, state, MarketState.BULL)
+                and self._state_allows(symbol, state, (MarketState.BULL, MarketState.UPTREND))
             ):
                 atm_call = self._find_atm_option(call_subset, underlying_price)
                 if atm_call is not None:
@@ -239,23 +239,31 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
     def _state_allows(
         symbol: Optional[str],
         state: Optional[MarketState],
-        required: MarketState,
+        required: Union[MarketState, Iterable[MarketState]],
     ) -> bool:
+        if isinstance(required, MarketState):
+            allowed: Tuple[MarketState, ...] = (required,)
+        else:
+            allowed = tuple(required)
+        if not allowed:
+            return True
         if state is None:
             return True
-        if state == required:
+        if state in allowed:
+            allowed_values = ",".join(item.value for item in allowed)
             logger.info(
-                "Market state filter passed | symbol={symbol} state={state} required={required}",
+                "Market state filter passed | symbol={symbol} state={state} allowed={allowed}",
                 symbol=symbol,
                 state=state.value,
-                required=required.value,
+                allowed=allowed_values,
             )
             return True
+        required_str = ",".join(item.value for item in allowed)
         logger.info(
             "Skipping spread due to market state | symbol={symbol} state={state} required={required}",
             symbol=symbol,
             state=state.value,
-            required=required.value,
+            required=required_str,
         )
         return False
 
