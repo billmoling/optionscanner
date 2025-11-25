@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from ai_agents import SignalExplainAgent, SignalValidationAgent
 from notifications import SlackNotifier
 from option_data import BaseDataFetcher, OptionChainSnapshot
+from position_cache import ExitRecommendation, PositionCache
 from stock_data import StockDataFetcher
 from technical_indicators import TechnicalIndicatorProcessor
 from market_state import DictMarketStateProvider, MarketStateClassifier, MarketStateResult
@@ -57,6 +58,8 @@ async def run_once(
                 if state_result:
                     snapshot.context.setdefault("market_state", state_result.state.value)
                     snapshot.context.setdefault("market_state_as_of", state_result.as_of.isoformat())
+    snapshot_by_symbol = {snapshot.symbol.upper(): snapshot for snapshot in snapshots}
+    cache = PositionCache(results_dir / "position_cache.json")
     state_provider = None
     if market_state_results:
         state_provider = DictMarketStateProvider(
@@ -75,8 +78,14 @@ async def run_once(
             signals = strategy.on_data(snapshots)
             for signal in signals:
                 aggregated_signals.append((strategy.name, signal))
+                cache.record_signal(strategy.name, signal, snapshot_by_symbol.get((signal.symbol or "").upper()))
         except Exception:
             logger.exception("Strategy {name} failed", name=strategy.name)
+    exit_recommendations = cache.evaluate_exits(snapshot_by_symbol)
+    cache.save()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if exit_recommendations:
+        _export_exit_recommendations(results_dir, exit_recommendations, timestamp)
     if not aggregated_signals:
         logger.info("No trade signals generated in this iteration")
         return
@@ -85,11 +94,10 @@ async def run_once(
         explain_agent = SignalExplainAgent(enable_gemini=True)
     if enable_gemini and validation_agent is None:
         validation_agent = SignalValidationAgent(enable_gemini=True)
-    snapshot_by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
     rows: List[Dict[str, Any]] = []
     signals_only = [signal for _strategy_name, signal in aggregated_signals]
     for strategy_name, signal in aggregated_signals:
-        snapshot = snapshot_by_symbol.get(signal.symbol)
+        snapshot = snapshot_by_symbol.get((signal.symbol or "").upper())
         row = asdict(signal)
         row.update(
             {
@@ -116,7 +124,6 @@ async def run_once(
     ordered_columns = [col for col in preferred_order if col in df.columns]
     remaining_columns = [col for col in df.columns if col not in ordered_columns]
     df = df[ordered_columns + remaining_columns]
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     file_path = results_dir / f"signals_{timestamp}.csv"
     df.to_csv(file_path, index=False)
     logger.info("Saved {count} signals to {path}", count=len(df), path=str(file_path))
@@ -185,6 +192,36 @@ async def _fetch_underlying_context(
             continue
         context[symbol.upper()] = metrics
     return context, state_results
+
+
+def _export_exit_recommendations(
+    results_dir: Path,
+    recommendations: List[ExitRecommendation],
+    timestamp: str,
+) -> None:
+    rows = [
+        {
+            "symbol": rec.symbol,
+            "strategy": rec.strategy,
+            "direction": rec.direction,
+            "strike": rec.strike,
+            "expiry": rec.expiry,
+            "reason": rec.reason,
+            "action": rec.action,
+        }
+        for rec in recommendations
+    ]
+    if not rows:
+        return
+    results_dir.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(rows)
+    path = results_dir / f"exits_{timestamp}.csv"
+    df.to_csv(path, index=False)
+    logger.info(
+        "Generated {count} exit recommendations | path={path}",
+        count=len(df),
+        path=str(path),
+    )
 
 
 async def run_scheduler(

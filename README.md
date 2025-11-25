@@ -139,6 +139,12 @@ strategies:
 
 Set `enabled: false` at the top level (next to `params`) to skip instantiating a strategy entirely, and use the nested `params.enabled` knob for classes such as `CoveredCallStrategy` that internally gate their execution. During `main.py` start-up the overrides are applied before `run_once` executes, so the scheduled runner and the portfolio workflow see the updated configuration automatically.
 
+## Exit monitoring and portfolio mapping
+
+Each strategy signal now populates a lightweight `position_cache.json` file under `results/`. The cache stores the originating strategy, contract details, rationale, and last-seen timestamp so live IBKR positions can be matched back to their strategy. On every scanner run the cache evaluates simple exit rules (for example, short strike breaches or DTE thresholds) using the latest snapshots and writes any recommendations to `results/exits_YYYYMMDD_HHMMSS.csv`. Feed those CSVs into your portfolio workflow—or reconcile them with actual IBKR positions—to decide when to harvest profits, roll, or cut risk without rewriting the portfolio manager.
+
+Need bespoke criteria? Register your own exit evaluator by calling `PositionCache.register_evaluator("MY_DIRECTION", func)` before the run; each evaluator receives the cached entry, the latest snapshot, and `datetime.utcnow()` so you can encode custom roll triggers per strategy.
+
 ## Running tests
 
 The project ships with focused unit tests for AI agents, strategy logic, and Slack notifications. Execute the full suite with:
