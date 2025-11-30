@@ -152,21 +152,36 @@ class PositionCache:
             direction=signal.direction,
         )
 
-    def reconcile_with_positions(self, contract_keys: Iterable[str]) -> None:
-        """Mark cache entries as closed when the position no longer exists."""
+    def reconcile_with_positions(self, positions: Iterable[Mapping[str, object]]) -> None:
+        """Mark cache entries as closed when no matching live position exists.
 
-        active = {key.upper() for key in contract_keys}
-        for key, entry in list(self._entries.items()):
+        Matching is performed on symbol/option_type/strike/expiry; direction is ignored to
+        tolerate legs recorded with different naming conventions. Pass IBKR positions or
+        normalised rows from `portfolio.positions.PositionLoader`.
+        """
+
+        active_keys = {
+            self._position_signature(
+                symbol=pos.get("symbol") or pos.get("underlying"),
+                option_type=pos.get("right"),
+                strike=pos.get("strike"),
+                expiry=pos.get("expiry"),
+            )
+            for pos in positions
+        }
+        active_keys = {key for key in active_keys if key}
+        for entry in self._entries.values():
             if entry.status != "open":
                 continue
-            if entry.key().upper() not in active:
-                entry.status = "closed"
-                entry.last_seen = datetime.now(timezone.utc).isoformat()
-                logger.info(
-                    "Marking cached position as closed | symbol={symbol} strategy={strategy}",
-                    symbol=entry.symbol,
-                    strategy=entry.strategy,
-                )
+            if self._position_signature(entry.symbol, entry.option_type, entry.strike, entry.expiry) in active_keys:
+                continue
+            entry.status = "closed"
+            entry.last_seen = datetime.now(timezone.utc).isoformat()
+            logger.info(
+                "Marking cached position as closed | symbol={symbol} strategy={strategy}",
+                symbol=entry.symbol,
+                strategy=entry.strategy,
+            )
 
     # ------------------------------------------------------------------
     def register_evaluator(self, direction: str, evaluator: ExitEvaluator) -> None:
@@ -371,6 +386,23 @@ class PositionCache:
         if dte <= 3:
             return f"DTE {dte} below default management threshold"
         return None
+
+    @staticmethod
+    def _position_signature(
+        symbol: object,
+        option_type: object,
+        strike: object,
+        expiry: object,
+    ) -> Optional[str]:
+        if symbol is None:
+            return None
+        try:
+            strike_val = float(strike)
+        except (TypeError, ValueError):
+            strike_val = None
+        option = str(option_type or "").upper()
+        expiry_val = str(expiry) if expiry is not None else ""
+        return f"{str(symbol).upper()}::{option}::{strike_val}::{expiry_val}"
 
 
 __all__ = ["PositionCache", "ExitRecommendation"]

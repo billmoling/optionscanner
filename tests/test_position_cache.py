@@ -106,3 +106,43 @@ def test_position_cache_handles_short_call_exit(tmp_path) -> None:
     recs = cache.evaluate_exits({"MSFT": snapshot})
 
     assert recs, "Short call evaluator should trigger when price is above strike"
+
+
+def test_position_cache_reconciles_positions(tmp_path) -> None:
+    path = tmp_path / "cache.json"
+    cache = PositionCache(path)
+    signal = TradeSignal(
+        symbol="QQQ",
+        expiry=datetime.now(timezone.utc) + timedelta(days=15),
+        strike=400.0,
+        option_type="PUT",
+        direction="BULL_PUT_CREDIT_SPREAD",
+        rationale="credit",
+    )
+    snapshot = OptionChainSnapshot(
+        symbol="QQQ",
+        underlying_price=420.0,
+        timestamp=datetime.now(timezone.utc),
+        options=[],
+    )
+
+    cache.record_signal("PutCredit", signal, snapshot)
+    cache.reconcile_with_positions(
+        [
+            {
+                "symbol": "QQQ",
+                "right": "P",
+                "strike": 400.0,
+                "expiry": signal.expiry.isoformat(),
+            }
+        ]
+    )
+    cache.save()
+
+    # Still open because a matching position exists
+    payload = json.loads(path.read_text())
+    assert payload[0]["status"] == "open"
+
+    # Reconcile with no positions -> should mark closed
+    cache.reconcile_with_positions([])
+    assert any(entry.status == "closed" for entry in cache._PositionCache__dict__["_entries"].values())  # type: ignore[attr-defined]
