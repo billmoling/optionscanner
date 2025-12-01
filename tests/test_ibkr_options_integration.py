@@ -1,5 +1,7 @@
+import logging
 import math
 import os
+import sys
 import time
 import unittest
 from datetime import datetime
@@ -10,6 +12,13 @@ from ib_async import IB, Option, Stock
 
 from option_data import MARKET_DATA_TYPE_CODES
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+log = logging.getLogger(__name__)
+
 load_dotenv()
 
 
@@ -17,7 +26,7 @@ def _is_ibkr_gateway_configured() -> bool:
     required_vars = ("TWS_USERID", "TWS_PASSWORD", "TRADING_MODE")
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
-        print(
+        log.warning(
             "Skipping IBKR option-chain test: set TWS_USERID, TWS_PASSWORD, and TRADING_MODE in your .env file."
         )
         return False
@@ -126,7 +135,7 @@ class IBKROptionChainIntegrationTest(unittest.TestCase):
 
         expiry = expiry_display
         self.assertGreater(ask or mark, 0.0, "Expected positive ask or mark for NVDA option.")
-        print(
+        log.info(
             f"NVDA {expiry} CALL bid/ask: {bid:.2f}/{ask:.2f} (mark {mark:.2f}) "
             f"using {market_data_type} market data."
         )

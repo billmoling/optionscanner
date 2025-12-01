@@ -1,5 +1,7 @@
+import logging
 import math
 import os
+import sys
 import time
 import unittest
 from datetime import datetime, timezone
@@ -9,6 +11,13 @@ from ib_async import IB, Stock
 
 from option_data import MARKET_DATA_TYPE_CODES
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+log = logging.getLogger(__name__)
+
 load_dotenv()
 
 
@@ -16,7 +25,7 @@ def _is_ibkr_gateway_configured() -> bool:
     required_vars = ("TWS_USERID", "TWS_PASSWORD", "TRADING_MODE")
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
-        print(
+        log.warning(
             "Skipping IBKR integration test: set TWS_USERID, TWS_PASSWORD, and TRADING_MODE in your .env file."
         )
         return False
@@ -70,7 +79,7 @@ class IBKRMarketDataIntegrationTest(unittest.TestCase):
                 ib.disconnect()
 
         self.assertGreater(price, 0.0, "Expected NVDA price to be positive.")
-        print(
+        log.info(
             f"NVDA price: {price:.2f} captured at {timestamp.isoformat()} "
             f"using {market_data_type} market data."
         )
