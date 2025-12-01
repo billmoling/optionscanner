@@ -24,7 +24,7 @@ def _is_gemini_enabled() -> bool:
 
 
 @unittest.skipUnless(_is_gemini_enabled(), "Gemini credentials not configured; skipping integration test.")
-class SignalExplainAgentIntegrationTest(unittest.TestCase):
+class GeminiClientIntegrationTest(unittest.TestCase):
     def test_explain_agent_generates_output(self) -> None:
         system_prompt = "You are an expert options strategist who explains trade signals."
         user_prompt = (

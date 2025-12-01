@@ -64,11 +64,21 @@ python main.py --run-mode local --market-data FROZEN --config config.yaml
 
 Place snapshot files (e.g., `NVDA_20240101_120000.parquet`) under the `data_dir` configured in `config.yaml`. The run finishes after processing the locally stored data once.
 
+### 2. Scheduled runs (loop on configured times)
+
+Use this when you want the scanner (or just the portfolio workflow) to run automatically at the times listed under `schedule.times` in `config.yaml` (respects `schedule.timezone`).
+
+```bash
+python main.py --run-mode schedule --config config.yaml
+```
+
+The process stays alive; ensure your Docker container remains running to honor the schedule. Combine with `--portfolio-only` to skip signal generation and run only the portfolio manager on the same schedule.
+
 ### CLI reference
 
 | Flag | Description |
 | --- | --- |
-| `--run-mode {local}` | Select the execution mode. |
+| `--run-mode {local,schedule}` | Select the execution mode (single run or scheduled loop). |
 | `--config PATH` | Path to the YAML configuration file (defaults to `config.yaml`). |
 | `--market-data TYPE` | IBKR market data type (`LIVE` or `FROZEN`). |
 | `--portfolio-only` | Skip signal generation and run only the portfolio manager workflow. |
@@ -78,7 +88,11 @@ Place snapshot files (e.g., `NVDA_20240101_120000.parquet`) under the `data_dir`
 Use `--portfolio-only` when you only need the portfolio risk workflow (positions, Greeks, risk checks, Slack summary) without fetching new option signals. The flag honors the selected `--run-mode`, so Docker helpers still start when requested, and it overrides the `DISABLE_PORTFOLIO_MANAGER` environment variable.
 
 ```bash
+# Single-run portfolio workflow
 python main.py --portfolio-only --run-mode local --config config.yaml
+
+# Scheduled portfolio workflow (runs at times in config.yaml:schedule.times)
+python main.py --portfolio-only --run-mode schedule --config config.yaml
 ```
 
 Combine the flag with your preferred workflow to ensure the IBKR gateway container is running before the portfolio manager connects.

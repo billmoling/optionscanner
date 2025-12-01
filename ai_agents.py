@@ -1,6 +1,7 @@
-"""Utility agents for explaining and validating trade signals."""
+"""Utility agents for batching and validating trade signals."""
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from statistics import mean
@@ -8,113 +9,123 @@ from typing import Iterable, List, Optional
 
 from loguru import logger
 
-from explanation_templates import TemplateExplanationBuilder
 from gemini_client import GeminiClient, GeminiClientError
 from option_data import OptionChainSnapshot
 from strategies.base import TradeSignal
 
 
 @dataclass(slots=True)
-class SignalExplainAgent:
-    """Generate a natural language explanation for a trade signal."""
+class GeminiSelection:
+    """Represents a Gemini-chosen finalist from a batch review."""
+
+    id: int
+    score: Optional[float] = None
+    reason: Optional[str] = None
+
+
+@dataclass(slots=True)
+class BatchSelectionResult:
+    """Outcome of a batch Gemini selection call."""
+
+    selections: List[GeminiSelection]
+    prompt: Optional[str]
+    response: Optional[str]
+
+
+@dataclass(slots=True)
+class SignalBatchSelector:
+    """Rank a batch of signals at once and select the top candidates."""
 
     client: Optional[GeminiClient] = None
     enable_gemini: bool = True
-    templates: TemplateExplanationBuilder = field(default_factory=TemplateExplanationBuilder)
-    cooldown_seconds: int = 60
-    _rate_limited_until: float = field(init=False, default=0.0)
+    top_k: int = 5
 
-    def __post_init__(self) -> None:
-        if self.enable_gemini and self.client is None:
+    def select(self, signals: List[tuple[str, TradeSignal]]) -> BatchSelectionResult:
+        if not self.enable_gemini or not signals:
+            return BatchSelectionResult([], None, None)
+        if self.client is None:
             self.client = GeminiClient()
 
-    def explain(
-        self,
-        signal: TradeSignal,
-        snapshot: Optional[OptionChainSnapshot],
-    ) -> str:
-        """Return a concise explanation of what the signal attempts to capture."""
-
-        snapshot_summary = self._snapshot_summary(snapshot)
         system_prompt = (
-            "You are an expert options strategist. Explain to a trader why an options signal "
-            "was generated, covering upside, downside, and how market context supports the idea."
+            "You are an options desk lead. Review a list of candidate option trades and pick the strongest ideas. "
+            f"Select at most {self.top_k} finalists that balance risk/reward and liquidity. "
+            "Return ONLY JSON with shape: "
+            '{"finalists":[{"id":<number>,"score":<0-10 optional>,"reason":"concise why this idea wins"}],'
+            '"summary":"one-sentence portfolio note"}. '
+            "Use only IDs that appear in the list."
         )
-        user_prompt = (
-            "Provide a focused explanation (3-5 sentences) of the following trade signal. "
-            "Highlight what happens if price rises or falls, and reference relevant option market context.\n"
-            f"Signal:\n"
-            f"  Symbol: {signal.symbol}\n"
-            f"  Direction: {signal.direction}\n"
-            f"  Option type: {signal.option_type}\n"
-            f"  Strike: {signal.strike:.2f}\n"
-            f"  Expiry: {signal.expiry.isoformat()}\n"
-            f"  Rationale: {signal.rationale or 'N/A'}\n"
-            f"Market snapshot summary:\n{snapshot_summary or 'No recent market data provided.'}"
-        )
-        if not self.enable_gemini:
-            logger.info(
-                "Gemini explain disabled via configuration; using template | symbol={symbol}",
-                symbol=signal.symbol,
-            )
-            return self._template_response(signal, snapshot)
-        if time.time() < self._rate_limited_until:
-            logger.info(
-                "Gemini explain temporarily disabled due to prior rate limit; using template | symbol={symbol}",
-                symbol=signal.symbol,
-            )
-            return self._template_response(signal, snapshot)
+        user_prompt = self._build_user_prompt(signals)
         try:
-            explanation = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
+            response = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
         except GeminiClientError as exc:
-            self._handle_rate_limit(exc)
-            logger.warning(
-                "Falling back to template explanation | symbol={symbol} reason={error}",
-                symbol=signal.symbol,
-                error=exc,
-            )
-            return self._template_response(signal, snapshot)
-        logger.debug(
-            "Explain agent (Gemini) output | symbol={symbol} text={text}",
-            symbol=signal.symbol,
-            text=explanation,
-        )
-        return explanation
+            logger.warning("Batch Gemini selection failed | reason={error}", error=exc)
+            return BatchSelectionResult([], user_prompt, None)
 
-    def _template_response(self, signal: TradeSignal, snapshot: Optional[OptionChainSnapshot]) -> str:
-        fallback = self.templates.build(signal, snapshot)
-        logger.debug(
-            "Explain agent (fallback) output | symbol={symbol} text={text}",
-            symbol=signal.symbol,
-            text=fallback,
-        )
-        return fallback
+        selections = self._parse_response(response)
+        if not selections:
+            logger.warning("Gemini selection returned no finalists; response may be unstructured")
+        return BatchSelectionResult(selections, user_prompt, response)
 
-    def _handle_rate_limit(self, exc: GeminiClientError) -> None:
-        message = str(exc).lower()
-        if "429" in message or "resource exhausted" in message or "rate" in message:
-            self._rate_limited_until = time.time() + max(self.cooldown_seconds, 1)
-
-    def _snapshot_summary(self, snapshot: Optional[OptionChainSnapshot]) -> str:
-        if snapshot is None or not snapshot.options:
-            return ""
+    def _build_user_prompt(self, signals: List[tuple[str, TradeSignal]]) -> str:
         lines = [
-            f"Underlying price: {snapshot.underlying_price:.2f}",
-            f"Snapshot timestamp (UTC): {snapshot.timestamp.isoformat()}",
+            "Evaluate these option trade signals. Consider directional edge, risk, and simplicity.",
+            "Pick the top ideas only; skip low-quality trades.",
+            "",
+            "Signals:",
         ]
-        sorted_options = sorted(
-            snapshot.options,
-            key=lambda option: abs(float(option.get("strike", 0.0)) - snapshot.underlying_price),
-        )[:5]
-        for option in sorted_options:
-            strike = float(option.get("strike", 0.0))
-            option_type = option.get("option_type", "?")
-            mark = float(option.get("mark", 0.0) or 0.0)
-            delta = float(option.get("delta", 0.0) or 0.0)
+        for idx, (strategy, signal) in enumerate(signals, start=1):
+            expiry_text = signal.expiry.date().isoformat() if hasattr(signal.expiry, "date") else str(signal.expiry)
             lines.append(
-                f"  {option_type} strike {strike:.2f} | mark {mark:.2f} | delta {delta:.2f}"
+                f"{idx}. Strategy: {strategy} | Symbol: {signal.symbol} | Direction: {signal.direction} | "
+                f"Option: {signal.option_type} {signal.strike:.2f} exp {expiry_text} | "
+                f"Rationale: {signal.rationale}"
             )
+        lines.append("")
+        lines.append("Return JSON only.")
         return "\n".join(lines)
+
+    def _parse_response(self, response: str) -> List[GeminiSelection]:
+        if not response:
+            return []
+        candidates = [response]
+        if "```" in response:
+            candidates.extend(part for part in response.split("```") if part and "{" in part)
+
+        for candidate in candidates:
+            try:
+                data = json.loads(candidate.strip())
+                selections = self._extract_selections(data)
+                if selections:
+                    return selections
+            except json.JSONDecodeError:
+                continue
+        return []
+
+    def _extract_selections(self, data: object) -> List[GeminiSelection]:
+        if not isinstance(data, dict):
+            return []
+        finalists = data.get("finalists")
+        if not isinstance(finalists, list):
+            return []
+        selections: List[GeminiSelection] = []
+        for item in finalists:
+            if not isinstance(item, dict):
+                continue
+            idx_raw = item.get("id")
+            try:
+                idx = int(idx_raw)
+            except (TypeError, ValueError):
+                continue
+            score_raw = item.get("score")
+            try:
+                score = float(score_raw) if score_raw is not None else None
+            except (TypeError, ValueError):
+                score = None
+            reason = item.get("reason")
+            if isinstance(reason, str):
+                reason = reason.strip()
+            selections.append(GeminiSelection(id=idx, score=score, reason=reason or None))
+        return selections
 
 
 @dataclass(slots=True)
@@ -284,20 +295,27 @@ class SignalValidationAgent:
             return "Option pricing looks balanced; position sizing discipline is important."
         return "The signal runs counter to the detected skew, so ensure risk controls are strict."
 
-    def _peer_context(
-        self,
-        signal: TradeSignal,
-        peer_signals: Iterable[TradeSignal],
-    ) -> Optional[str]:
-        similar = [s for s in peer_signals if s.symbol == signal.symbol and s is not signal]
-        if not similar:
-            return None
-        same_direction = [s for s in similar if s.direction == signal.direction]
-        if len(same_direction) == len(similar):
-            return "Multiple strategies share this direction, adding conviction."
-        if not same_direction:
-            return "Other strategies disagree on direction; double-check assumptions."
-        return "Some strategies agree while others differ; weigh conviction before acting."
+def _peer_context(
+    self,
+    signal: TradeSignal,
+    peer_signals: Iterable[TradeSignal],
+) -> Optional[str]:
+    similar = [s for s in peer_signals if s.symbol == signal.symbol and s is not signal]
+    if not similar:
+        return None
+    same_direction = [s for s in similar if s.direction == signal.direction]
+    if len(same_direction) == len(similar):
+        return "Multiple strategies share this direction, adding conviction."
+    if not same_direction:
+        return "Other strategies disagree on direction; double-check assumptions."
+    return "Some strategies agree while others differ; weigh conviction before acting."
 
 
-__all__ = ["SignalExplainAgent", "SignalValidationAgent", "GeminiClient", "GeminiClientError"]
+__all__ = [
+    "SignalValidationAgent",
+    "SignalBatchSelector",
+    "GeminiSelection",
+    "BatchSelectionResult",
+    "GeminiClient",
+    "GeminiClientError",
+]

@@ -14,13 +14,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 import yaml
 from loguru import logger
 
-from ai_agents import SignalExplainAgent, SignalValidationAgent
 from dotenv import load_dotenv
 from logging_utils import configure_logging
 from notifications import SlackNotifier
 from option_data import IBKRDataFetcher, MARKET_DATA_TYPE_CODES
 from portfolio.manager import PortfolioManager
-from runner import run_once
+from runner import run_once, run_scheduler
 from strategies.base import BaseOptionStrategy
 from stock_data import StockDataFetcher
 from technical_indicators import TechnicalIndicatorProcessor
@@ -30,6 +29,7 @@ class RunMode(str, Enum):
     """Supported execution modes for the scanner."""
 
     LOCAL_IMMEDIATE = "local"
+    SCHEDULED = "schedule"
 
 
 def load_config(path: Path) -> Dict[str, Any]:
@@ -105,9 +105,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Nautilus option scanner.")
     parser.add_argument(
         "--run-mode",
-        choices=[RunMode.LOCAL_IMMEDIATE.value],
+        choices=[RunMode.LOCAL_IMMEDIATE.value, RunMode.SCHEDULED.value],
         default=RunMode.LOCAL_IMMEDIATE.value,
-        help="Select how the scanner executes: local (single run).",
+        help="Select how the scanner executes: local (single run) or schedule (loop on configured times).",
     )
     parser.add_argument(
         "--market-data",
@@ -244,6 +244,32 @@ def main(argv: Optional[List[str]] = None) -> None:
             return
         execute_portfolio_manager(fetcher, portfolio_settings)
 
+    post_run = maybe_run_portfolio_manager if not disable_portfolio_manager else None
+
+    if run_mode is RunMode.SCHEDULED:
+        logger.info("Scheduled mode enabled; running on configured schedule.")
+        run_signals = not portfolio_only
+        try:
+            asyncio.run(
+                run_scheduler(
+                    config,
+                    fetcher,
+                    strategies,
+                    symbols,
+                    results_dir,
+                    slack_notifier,
+                    enable_gemini=enable_gemini,
+                    run_signals=run_signals,
+                    stock_fetcher=stock_fetcher,
+                    indicator_processor=indicator_processor,
+                    stock_history_kwargs=stock_history_kwargs,
+                    post_run=post_run if portfolio_only or not disable_portfolio_manager else None,
+                )
+            )
+        except KeyboardInterrupt:
+            logger.info("Shutdown requested by user")
+        return
+
     if portfolio_only:
         logger.info("Portfolio-only mode enabled; skipping option scanner execution.")
         try:
@@ -256,13 +282,6 @@ def main(argv: Optional[List[str]] = None) -> None:
                 logger.warning("Failed to cleanly disconnect IBKR after portfolio-only run")
         return
 
-    explain_agent = (
-        SignalExplainAgent(enable_gemini=enable_gemini) if enable_gemini else None
-    )
-    validation_agent = (
-        SignalValidationAgent(enable_gemini=enable_gemini) if enable_gemini else None
-    )
-
     try:
         asyncio.run(
             run_once(
@@ -270,8 +289,6 @@ def main(argv: Optional[List[str]] = None) -> None:
                 strategies,
                 symbols,
                 results_dir,
-                explain_agent=explain_agent,
-                validation_agent=validation_agent,
                 slack_notifier=slack_notifier,
                 enable_gemini=enable_gemini,
                 stock_fetcher=stock_fetcher,

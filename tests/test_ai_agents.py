@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 
 from ai_agents import (
     GeminiClientError,
-    SignalExplainAgent,
     SignalValidationAgent,
 )
 from option_data import OptionChainSnapshot
@@ -64,40 +63,6 @@ def build_snapshot() -> OptionChainSnapshot:
             },
         ],
     )
-
-
-class SignalExplainAgentTests(unittest.TestCase):
-    def test_explain_agent_uses_gemini_when_available(self) -> None:
-        client = DummyGeminiClient(response="Gemini explanation")
-        agent = SignalExplainAgent(client=client)
-        signal = build_signal()
-        snapshot = build_snapshot()
-
-        explanation = agent.explain(signal, snapshot)
-
-        self.assertEqual(explanation, "Gemini explanation")
-        self.assertIsNotNone(client.last_user_prompt)
-        self.assertIn("Signal:", client.last_user_prompt or "")
-
-    def test_explain_agent_falls_back_when_gemini_fails(self) -> None:
-        client = DummyGeminiClient(should_raise=True)
-        agent = SignalExplainAgent(client=client)
-        signal = build_signal()
-
-        explanation = agent.explain(signal, None)
-
-        self.assertIn("setup anticipates strength", explanation or "")
-        self.assertIn(signal.symbol, explanation)
-
-    def test_explain_agent_can_disable_gemini(self) -> None:
-        client = DummyGeminiClient(response="Gemini explanation")
-        agent = SignalExplainAgent(client=client, enable_gemini=False)
-        signal = build_signal()
-
-        explanation = agent.explain(signal, None)
-
-        self.assertIn(signal.symbol, explanation)
-        self.assertIsNone(client.last_user_prompt)
 
 
 class SignalValidationAgentTests(unittest.TestCase):

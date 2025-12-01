@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +12,7 @@ import pandas as pd
 from loguru import logger
 from zoneinfo import ZoneInfo
 
-from ai_agents import SignalExplainAgent, SignalValidationAgent
+from ai_agents import BatchSelectionResult, SignalBatchSelector
 from notifications import SlackNotifier
 from option_data import BaseDataFetcher, OptionChainSnapshot
 from position_cache import ExitRecommendation, PositionCache
@@ -28,8 +29,7 @@ async def run_once(
     symbols: Iterable[str],
     results_dir: Path,
     *,
-    explain_agent: Optional[SignalExplainAgent] = None,
-    validation_agent: Optional[SignalValidationAgent] = None,
+    selection_agent: Optional[SignalBatchSelector] = None,
     slack_notifier: Optional[SlackNotifier] = None,
     enable_gemini: bool = True,
     stock_fetcher: Optional[StockDataFetcher] = None,
@@ -90,24 +90,27 @@ async def run_once(
         logger.info("No trade signals generated in this iteration")
         return
     results_dir.mkdir(parents=True, exist_ok=True)
-    if enable_gemini and explain_agent is None:
-        explain_agent = SignalExplainAgent(enable_gemini=True)
-    if enable_gemini and validation_agent is None:
-        validation_agent = SignalValidationAgent(enable_gemini=True)
+    selection_agent = selection_agent or (SignalBatchSelector(enable_gemini=enable_gemini) if enable_gemini else None)
+    selection_result: BatchSelectionResult = (
+        selection_agent.select(aggregated_signals) if selection_agent else BatchSelectionResult([], None, None)
+    )
+    finalist_map = {selection.id: selection for selection in selection_result.selections}
+
     rows: List[Dict[str, Any]] = []
-    signals_only = [signal for _strategy_name, signal in aggregated_signals]
-    for strategy_name, signal in aggregated_signals:
-        snapshot = snapshot_by_symbol.get((signal.symbol or "").upper())
+    for idx, (strategy_name, signal) in enumerate(aggregated_signals, start=1):
         row = asdict(signal)
         row.update(
             {
                 "strategy": strategy_name,
+                "gemini_id": idx,
             }
         )
-        if explain_agent:
-            row["explanation"] = explain_agent.explain(signal, snapshot)
-        if validation_agent:
-            row["validation"] = validation_agent.review(signal, snapshot, signals_only)
+        selection = finalist_map.get(idx)
+        row["gemini_selected"] = selection is not None
+        row["gemini_score"] = selection.score if selection else None
+        row["gemini_reason"] = selection.reason if selection else None
+        if selection and selection.reason:
+            row["explanation"] = selection.reason
         rows.append(row)
     df = pd.DataFrame(rows)
     preferred_order = [
@@ -118,8 +121,10 @@ async def run_once(
         "strategy",
         "direction",
         "rationale",
+        "gemini_selected",
+        "gemini_score",
+        "gemini_reason",
         "explanation",
-        "validation",
     ]
     ordered_columns = [col for col in preferred_order if col in df.columns]
     remaining_columns = [col for col in df.columns if col not in ordered_columns]
@@ -128,9 +133,30 @@ async def run_once(
     df.to_csv(file_path, index=False)
     logger.info("Saved {count} signals to {path}", count=len(df), path=str(file_path))
 
+    if selection_agent and selection_result.response:
+        selection_path = results_dir / f"gemini_signal_selection_{timestamp}.json"
+        try:
+            payload = {
+                "as_of": timestamp,
+                "prompt": selection_result.prompt,
+                "response": selection_result.response,
+                "finalists": [
+                    {"id": sel.id, "score": sel.score, "reason": sel.reason} for sel in selection_result.selections
+                ],
+                "candidate_count": len(aggregated_signals),
+            }
+            selection_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            logger.info("Saved Gemini selection output to {path}", path=str(selection_path))
+        except Exception:
+            logger.warning("Failed to persist Gemini selection output", exc_info=True)
+
+    finalists_df = df[df["gemini_selected"] == True] if "gemini_selected" in df.columns else df.iloc[0:0]
     if slack_notifier:
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, slack_notifier.send_signals, df, file_path)
+        if finalists_df.empty:
+            logger.info("No Gemini-selected finalists to send to Slack")
+        else:
+            await loop.run_in_executor(None, slack_notifier.send_signals, finalists_df, file_path)
 
 
 async def _fetch_underlying_context(
@@ -233,6 +259,7 @@ async def run_scheduler(
     slack_notifier: Optional[SlackNotifier],
     *,
     enable_gemini: bool = True,
+    run_signals: bool = True,
     stock_fetcher: Optional[StockDataFetcher] = None,
     indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
     stock_history_kwargs: Optional[Dict[str, Any]] = None,
@@ -254,8 +281,7 @@ async def run_scheduler(
         timezone=getattr(tz, "key", str(tz)),
     )
 
-    explain_agent = SignalExplainAgent(enable_gemini=enable_gemini) if enable_gemini else None
-    validation_agent = SignalValidationAgent(enable_gemini=enable_gemini) if enable_gemini else None
+    selection_agent = SignalBatchSelector(enable_gemini=enable_gemini) if enable_gemini else None
 
     while True:
         now = datetime.now(tz)
@@ -270,19 +296,19 @@ async def run_scheduler(
         start = datetime.now(tz)
         logger.info("Starting scheduled run at {start}", start=start.isoformat())
         try:
-            await run_once(
-                fetcher,
-                strategies,
-                symbols,
-                results_dir,
-                explain_agent=explain_agent,
-                validation_agent=validation_agent,
-                slack_notifier=slack_notifier,
-                enable_gemini=enable_gemini,
-                stock_fetcher=stock_fetcher,
-                indicator_processor=indicator_processor,
-                stock_history_kwargs=stock_history_kwargs,
-            )
+            if run_signals:
+                await run_once(
+                    fetcher,
+                    strategies,
+                    symbols,
+                    results_dir,
+                    selection_agent=selection_agent,
+                    slack_notifier=slack_notifier,
+                    enable_gemini=enable_gemini,
+                    stock_fetcher=stock_fetcher,
+                    indicator_processor=indicator_processor,
+                    stock_history_kwargs=stock_history_kwargs,
+                )
             if post_run is not None:
                 try:
                     post_run()
