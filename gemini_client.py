@@ -24,7 +24,7 @@ class GeminiClientError(RuntimeError):
 class GeminiClient:
     """Lightweight wrapper for Google Gemini text generation."""
     'TODO: update model to use 2.5, the current API is my own account, which only have 2.0 access'
-    model_name: str = "gemini-2.5-flash"
+    model_name: str = "gemini-2.0-flash"
     api_key_env_vars: Sequence[str] = ("GOOGLE_API_KEY", "GEMINI_API_KEY")
     config_path_env_var: str = "GEMINI_CONFIG_PATH"
     config_file_candidates: Sequence[str] = (
@@ -34,12 +34,13 @@ class GeminiClient:
     )
     temperature: float = 0.6
     top_p: float = 0.9
-    max_output_tokens: int = 512
+    max_output_tokens: Optional[int] = None
     _model: Optional["genai.GenerativeModel"] = field(init=False, default=None)
     _configured: bool = field(init=False, default=False)
+    _last_system_prompt: Optional[str] = field(init=False, default=None)
 
-    def _ensure_model(self) -> "genai.GenerativeModel":
-        if self._configured and self._model is not None:
+    def _ensure_model(self, system_prompt: str) -> "genai.GenerativeModel":
+        if self._configured and self._model is not None and self._last_system_prompt == system_prompt:
             return self._model
         if genai is None:
             raise GeminiClientError(
@@ -52,16 +53,21 @@ class GeminiClient:
             )
         try:
             genai.configure(api_key=api_key)
-            generation_config = genai.GenerationConfig(
-                temperature=self.temperature,
-                top_p=self.top_p,
-                max_output_tokens=self.max_output_tokens,
-            )
+            generation_config_data = {
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+            }
+            if self.max_output_tokens is not None:
+                generation_config_data["max_output_tokens"] = self.max_output_tokens
+
+            generation_config = genai.GenerationConfig(**generation_config_data)
             self._model = genai.GenerativeModel(
                 self.model_name,
                 generation_config=generation_config,
+                system_instruction=system_prompt,
             )
             self._configured = True
+            self._last_system_prompt = system_prompt
             return self._model
         except Exception as exc:  # pragma: no cover - network/runtime failure
             raise GeminiClientError(f"Failed to initialise Gemini client: {exc}") from exc
@@ -125,37 +131,67 @@ class GeminiClient:
         return None
 
     def generate(self, *, system_prompt: str, user_prompt: str) -> str:
-        model = self._ensure_model()
-        prompt = dedent(
-            f"""
-            {system_prompt.strip()}
-
-            {user_prompt.strip()}
-            """
-        ).strip()
+        model = self._ensure_model(system_prompt=system_prompt.strip())
         try:
-            response = model.generate_content([{"role": "user", "parts": [{"text": prompt}]}])
+            response = model.generate_content(user_prompt.strip())
         except Exception as exc:  # pragma: no cover - API/runtime failure
             raise GeminiClientError(f"Gemini generation failed: {exc}") from exc
+        try:
+            return self._extract_text_from_response(response)
+        except GeminiClientError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive parsing
+            raise GeminiClientError(f"Unable to parse Gemini response: {exc}") from exc
 
+    def _extract_text_from_response(self, response: object) -> str:
+        """Best-effort extraction of text content from Gemini responses."""
         text: Optional[str]
         try:
             text = getattr(response, "text", None)
         except ValueError:
             text = None
-        if text:
+        if isinstance(text, str) and text.strip():
             return text.strip()
-        try:
-            candidates = getattr(response, "candidates", None) or []
-            parts = candidates[0].content.parts if candidates else []
-            combined = " ".join(
-                part.text for part in parts if getattr(part, "text", "")
-            )
-        except Exception as exc:  # pragma: no cover - defensive parsing
-            raise GeminiClientError(f"Unable to parse Gemini response: {exc}") from exc
-        if not combined.strip():
-            raise GeminiClientError("Gemini response did not contain text content")
-        return combined.strip()
+
+        candidates = getattr(response, "candidates", None) or []
+        finish_reasons: List[str] = []
+        collected_parts: List[str] = []
+
+        for candidate in candidates:
+            finish_reason = getattr(candidate, "finish_reason", None)
+            if finish_reason is None and isinstance(candidate, dict):
+                finish_reason = candidate.get("finish_reason")
+            if finish_reason:
+                finish_reasons.append(str(finish_reason))
+
+            content = getattr(candidate, "content", None)
+            if content is None and isinstance(candidate, dict):
+                content = candidate.get("content")
+
+            parts = getattr(content, "parts", None) if content is not None else None
+            if parts is None and isinstance(content, dict):
+                parts = content.get("parts")
+
+            for part in parts or []:
+                part_text = getattr(part, "text", None)
+                if part_text is None and isinstance(part, dict):
+                    part_text = part.get("text")
+                if isinstance(part_text, str) and part_text.strip():
+                    collected_parts.append(part_text.strip())
+                elif isinstance(part, str) and part.strip():
+                    collected_parts.append(part.strip())
+
+        if collected_parts:
+            return " ".join(collected_parts).strip()
+
+        block_reason = getattr(getattr(response, "prompt_feedback", None), "block_reason", None)
+        details: List[str] = []
+        if finish_reasons:
+            details.append(f"finish_reason={','.join(finish_reasons)}")
+        if block_reason:
+            details.append(f"block_reason={block_reason}")
+        detail_suffix = f" ({'; '.join(details)})" if details else ""
+        raise GeminiClientError(f"Gemini response did not contain text content{detail_suffix}")
 
 
 __all__ = ["GeminiClient", "GeminiClientError"]

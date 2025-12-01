@@ -55,10 +55,10 @@ services:
       # Build your app from the Dockerfile in the current directory
       build: .
       env_file: .env
-      # This is the command to run your scheduler
+      # Command to run the scanner once in local mode
       command: >
         python main.py 
-          --run-mode docker-scheduled 
+          --run-mode local 
           --config config.yaml
       # This ensures the gateway is started before your app tries to run
       depends_on:

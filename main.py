@@ -20,7 +20,7 @@ from logging_utils import configure_logging
 from notifications import SlackNotifier
 from option_data import IBKRDataFetcher, MARKET_DATA_TYPE_CODES
 from portfolio.manager import PortfolioManager
-from runner import run_once, run_scheduler
+from runner import run_once
 from strategies.base import BaseOptionStrategy
 from stock_data import StockDataFetcher
 from technical_indicators import TechnicalIndicatorProcessor
@@ -30,7 +30,6 @@ class RunMode(str, Enum):
     """Supported execution modes for the scanner."""
 
     LOCAL_IMMEDIATE = "local"
-    DOCKER_SCHEDULED = "docker-scheduled"
 
 
 def load_config(path: Path) -> Dict[str, Any]:
@@ -106,9 +105,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Nautilus option scanner.")
     parser.add_argument(
         "--run-mode",
-        choices=[mode.value for mode in RunMode],
+        choices=[RunMode.LOCAL_IMMEDIATE.value],
         default=RunMode.LOCAL_IMMEDIATE.value,
-        help="Select how the scanner executes: local (single run) or docker-scheduled (continuous loop).",
+        help="Select how the scanner executes: local (single run).",
     )
     parser.add_argument(
         "--market-data",
@@ -264,44 +263,23 @@ def main(argv: Optional[List[str]] = None) -> None:
         SignalValidationAgent(enable_gemini=enable_gemini) if enable_gemini else None
     )
 
-    if run_mode is RunMode.LOCAL_IMMEDIATE:
-        try:
-            asyncio.run(
-                run_once(
-                    fetcher,
-                    strategies,
-                    symbols,
-                    results_dir,
-                    explain_agent=explain_agent,
-                    validation_agent=validation_agent,
-                    slack_notifier=slack_notifier,
-                    enable_gemini=enable_gemini,
-                    stock_fetcher=stock_fetcher,
-                    indicator_processor=indicator_processor,
-                    stock_history_kwargs=stock_history_kwargs,
-                )
-            )
-            maybe_run_portfolio_manager(fetcher)
-        except KeyboardInterrupt:
-            logger.info("Shutdown requested by user")
-        return
-
     try:
         asyncio.run(
-            run_scheduler(
-                config,
+            run_once(
                 fetcher,
                 strategies,
                 symbols,
                 results_dir,
-                slack_notifier,
+                explain_agent=explain_agent,
+                validation_agent=validation_agent,
+                slack_notifier=slack_notifier,
                 enable_gemini=enable_gemini,
                 stock_fetcher=stock_fetcher,
                 indicator_processor=indicator_processor,
                 stock_history_kwargs=stock_history_kwargs,
-                post_run=lambda: maybe_run_portfolio_manager(fetcher),
             )
         )
+        maybe_run_portfolio_manager(fetcher)
     except KeyboardInterrupt:
         logger.info("Shutdown requested by user")
 

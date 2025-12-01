@@ -106,12 +106,15 @@ class PortfolioManager:
             self.actions,
         )
         csv_path = None
+        json_path = None
         try:
-            csv_path = self._reporter.write_csv(
+            csv_path, _json_unused, timestamp = self._reporter.write_outputs(
                 self.positions, self.greek_summary.per_symbol
             )
+            self._reporter.evaluate_positions_with_gemini(self.positions, timestamp)
         except Exception as exc:
             logger.warning("Failed to write portfolio CSV | reason={error}", error=exc)
+            csv_path = None
         self._reporter.log_details(message)
         self._reporter.send_notifications(message, csv_path)
         return message

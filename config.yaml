@@ -14,7 +14,7 @@ tickers:
   - IWM
 log_dir: "./logs"
 data_dir: "./data"
-enable_gemini: false
+enable_gemini: true
 stock_data:
   enabled: true
   client_id_offset: 25
@@ -85,7 +85,7 @@ schedule:
     - "12:50"
   timezone: "America/Los_Angeles"
 slack:
-  enabled: false
+  enabled: true
   webhook_url: "https://hooks.slack.com/services/XXX/YY/ZZ"
   username: "Option Scanner"
   channel: "#option-scanner-test"

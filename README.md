@@ -64,21 +64,11 @@ python main.py --run-mode local --market-data FROZEN --config config.yaml
 
 Place snapshot files (e.g., `NVDA_20240101_120000.parquet`) under the `data_dir` configured in `config.yaml`. The run finishes after processing the locally stored data once.
 
-### 2. Scheduled Docker run
-
-Run the scanner continuously on the configured schedule while keeping your separately managed `ib-gateway` container alive in the background. Start the gateway first (for example, `docker compose up -d ib-gateway`), then launch the scanner:
-
-```bash
-python main.py --run-mode docker-scheduled --config config.yaml
-```
-
-Scheduled run times are controlled via the `schedule` section of `config.yaml`. The process stays alive on the host, restarts the gateway container if it fails, and sleeps between runs based on the configured window.
-
 ### CLI reference
 
 | Flag | Description |
 | --- | --- |
-| `--run-mode {local,docker-scheduled}` | Select the execution mode. |
+| `--run-mode {local}` | Select the execution mode. |
 | `--config PATH` | Path to the YAML configuration file (defaults to `config.yaml`). |
 | `--market-data TYPE` | IBKR market data type (`LIVE` or `FROZEN`). |
 | `--portfolio-only` | Skip signal generation and run only the portfolio manager workflow. |
@@ -91,7 +81,7 @@ Use `--portfolio-only` when you only need the portfolio risk workflow (positions
 python main.py --portfolio-only --run-mode local --config config.yaml
 ```
 
-You can combine the flag with Docker-backed modes (e.g., `--run-mode docker-scheduled`) to ensure the IBKR gateway container is running before the portfolio manager connects.
+Combine the flag with your preferred workflow to ensure the IBKR gateway container is running before the portfolio manager connects.
 
 ## Signal output and Gemini usage
 
@@ -183,6 +173,16 @@ python -m unittest tests.test_ai_agents_integration
 ```
 
 The test uses your live Gemini access to generate an explanation for a sample trade signal and prints the response to the console. It is skipped automatically when the API key or `google-generativeai` package is missing.
+
+### Gemini smoke test (genai SDK)
+
+If you want a minimal sanity check of the newer `google-genai` SDK, install `google-genai` and run with stdout uncaptured so the inline prints are visible:
+
+```bash
+python -m pytest tests/test_gemini_call.py -q --capture=no
+```
+
+The test loads `.env`, uses `GOOGLE_API_KEY` or `GEMINI_API_KEY`, and makes a single live request to `gemini-2.5-flash`, echoing the raw response text to the console.
 
 ### IBKR integration test
 

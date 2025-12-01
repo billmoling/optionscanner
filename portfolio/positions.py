@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 import pandas as pd
-from ib_async import Contract, IB
+from ib_async import Contract, IB, Stock
 from loguru import logger
 
 
@@ -22,6 +22,7 @@ NORMALISED_COLUMNS = [
     "quantity",
     "avg_price",
     "market_price",
+    "underlying_price",
     "market_value",
     "cost_basis",
     "open_interest",
@@ -69,6 +70,7 @@ class PositionLoader:
         logger.info("Loading positions from IBKR account")
         positions = ib.positions()
         rows: List[dict] = []
+        underlying_cache: dict[str, float] = {}
         try:
             ib_portfolio_items = ib.portfolio()
         except Exception:
@@ -83,6 +85,7 @@ class PositionLoader:
             symbol = getattr(contract, "symbol", "")
             market_price = None
             market_value = None
+            underlying_price = None
             key = getattr(contract, "conId", None)
             if key is not None:
                 ib_portfolio = next(
@@ -91,6 +94,17 @@ class PositionLoader:
                 if ib_portfolio is not None:
                     market_price = float(getattr(ib_portfolio, "marketPrice", 0.0) or 0.0)
                     market_value = float(getattr(ib_portfolio, "marketValue", 0.0) or 0.0)
+            if contract.secType == "STK":
+                underlying_price = market_price
+            else:
+                underlying_price = underlying_cache.get(symbol)
+                if underlying_price is None:
+                    try:
+                        underlying_price = self._fetch_underlying_price(ib, symbol, getattr(contract, "currency", "USD"))
+                        if underlying_price is not None:
+                            underlying_cache[symbol] = underlying_price
+                    except Exception:
+                        underlying_price = None
             row = {
                 "account": getattr(position, "account", ""),
                 "underlying": symbol,
@@ -103,6 +117,7 @@ class PositionLoader:
                 "quantity": float(getattr(position, "position", 0.0) or 0.0),
                 "avg_price": float(getattr(position, "avgCost", 0.0) or 0.0) / multiplier,
                 "market_price": market_price,
+                "underlying_price": underlying_price,
                 "market_value": market_value,
                 "cost_basis": float(getattr(position, "avgCost", 0.0) or 0.0)
                 * float(getattr(position, "position", 0.0) or 0.0)
@@ -113,6 +128,24 @@ class PositionLoader:
             rows.append(row)
         df = pd.DataFrame(rows)
         return df
+
+    def _fetch_underlying_price(self, ib: IB, symbol: str, currency: str = "USD") -> Optional[float]:
+        try:
+            stock = Stock(symbol, exchange="SMART", currency=currency or "USD")
+            qualified = ib.qualifyContracts(stock)
+            if not qualified:
+                return None
+            ticker = ib.reqTickers(*qualified)
+            if not ticker:
+                return None
+            quote = ticker[0]
+            price = getattr(quote, "last", None) or getattr(quote, "marketPrice", None) or getattr(quote, "close", None)
+            if price is None:
+                return None
+            return float(price)
+        except Exception:
+            logger.debug("Unable to fetch underlying price | symbol={symbol}", symbol=symbol)
+            return None
 
     def _load_logged_positions(self) -> List[pd.DataFrame]:
         paths = list(self._iter_position_logs())

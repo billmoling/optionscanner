@@ -126,7 +126,7 @@ class SlackNotifier:
 
     def _resolve_webhook_url(self, config: Dict[str, object]) -> str:
         configured = str(config.get("webhook_url", "") or "").strip()
-        if configured:
+        if configured and not self._is_placeholder_webhook(configured):
             return configured
 
         env_value = os.getenv("SLACK_WEBHOOK_URL", "").strip()
@@ -138,6 +138,10 @@ class SlackNotifier:
             return secret_value
 
         return ""
+
+    def _is_placeholder_webhook(self, url: str) -> bool:
+        """Detect sample/placeholder webhook strings so we can fall back to real secrets."""
+        return any(token in url for token in ("XXX", "YYY", "ZZ", "ZZZ"))
 
     def _load_webhook_from_secrets(self) -> str:
         candidates: Iterable[Path] = (
@@ -170,7 +174,9 @@ class SlackNotifier:
         # Common layouts: top-level key or nested under "slack"/"notifications"
         direct = data.get("slack_webhook_url")
         if isinstance(direct, str) and direct.strip():
-            return direct.strip()
+            candidate = direct.strip()
+            if not self._is_placeholder_webhook(candidate):
+                return candidate
 
         for key in ("slack", "notifications"):
             section = data.get(key)
@@ -178,6 +184,8 @@ class SlackNotifier:
                 continue
             value = section.get("webhook_url") or section.get("slack_webhook_url")
             if isinstance(value, str) and value.strip():
-                return value.strip()
+                candidate = value.strip()
+                if not self._is_placeholder_webhook(candidate):
+                    return candidate
 
         return ""

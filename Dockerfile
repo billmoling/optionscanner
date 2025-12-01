@@ -36,4 +36,4 @@ RUN uv pip install --system -r requirements.txt
 COPY . .
 
 # Set the default command (we will override this in docker-compose.yml)
-CMD ["python", "main.py", "--run-mode", "docker-scheduled", "--config", "config.yaml"]
+CMD ["python", "main.py", "--run-mode", "local", "--config", "config.yaml"]
