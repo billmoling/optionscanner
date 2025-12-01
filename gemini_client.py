@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from textwrap import dedent
 from typing import List, Optional, Sequence
 
 from loguru import logger
@@ -25,8 +24,10 @@ class GeminiClient:
     """Lightweight wrapper for Google Gemini text generation."""
     'TODO: update model to use 2.5, the current API is my own account, which only have 2.0 access'
     model_name: str = "gemini-2.0-flash"
+    model_name_env_var: str = "GEMINI_MODEL_NAME"
     api_key_env_vars: Sequence[str] = ("GOOGLE_API_KEY", "GEMINI_API_KEY")
     config_path_env_var: str = "GEMINI_CONFIG_PATH"
+    model_config_candidates: Sequence[str] = ("config.yaml",)
     config_file_candidates: Sequence[str] = (
         "config/secrets.yaml",
         "secrets.yaml",
@@ -38,6 +39,11 @@ class GeminiClient:
     _model: Optional["genai.GenerativeModel"] = field(init=False, default=None)
     _configured: bool = field(init=False, default=False)
     _last_system_prompt: Optional[str] = field(init=False, default=None)
+
+    def __post_init__(self) -> None:
+        resolved_model = self._resolve_model_name()
+        if resolved_model:
+            self.model_name = resolved_model
 
     def _ensure_model(self, system_prompt: str) -> "genai.GenerativeModel":
         if self._configured and self._model is not None and self._last_system_prompt == system_prompt:
@@ -80,6 +86,53 @@ class GeminiClient:
         config_api_key = self._resolve_api_key_from_config()
         if config_api_key:
             return config_api_key
+        return None
+
+    def _resolve_model_name(self) -> Optional[str]:
+        env_model = os.getenv(self.model_name_env_var, "").strip()
+        if env_model:
+            return env_model
+
+        candidate_paths: List[Path] = []
+        settings_path = os.getenv("GEMINI_SETTINGS_PATH")
+        if settings_path:
+            candidate_paths.append(Path(settings_path).expanduser())
+        explicit_path = os.getenv(self.config_path_env_var)
+        if explicit_path:
+            candidate_paths.append(Path(explicit_path).expanduser())
+        candidate_paths.extend(Path(path) for path in self.model_config_candidates)
+
+        for path in candidate_paths:
+            if not path.exists():
+                continue
+            try:
+                with path.open("r", encoding="utf-8") as fh:
+                    data = yaml.safe_load(fh) or {}
+            except Exception as exc:  # pragma: no cover - defensive parsing
+                logger.debug(
+                    "Unable to read Gemini settings file | path={path} reason={error}",
+                    path=str(path),
+                    error=exc,
+                )
+                continue
+            model = self._extract_model_name(data)
+            if model:
+                return model
+        return None
+
+    def _extract_model_name(self, data: object) -> Optional[str]:
+        if not isinstance(data, dict):
+            return None
+        direct = data.get("gemini_model_name")
+        if isinstance(direct, str) and direct.strip():
+            return direct.strip()
+
+        gemini = data.get("gemini")
+        if isinstance(gemini, dict):
+            for key in ("model_name", "model"):
+                value = gemini.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
         return None
 
     def _resolve_api_key_from_config(self) -> Optional[str]:
