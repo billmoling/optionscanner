@@ -4,9 +4,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
+import logging
 import os
 import pkgutil
 import re
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
@@ -23,6 +25,14 @@ from runner import run_once, run_scheduler
 from strategies.base import BaseOptionStrategy
 from stock_data import StockDataFetcher
 from technical_indicators import TechnicalIndicatorProcessor
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+log = logging.getLogger(__name__)
 
 
 class RunMode(str, Enum):

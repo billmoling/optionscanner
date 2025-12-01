@@ -1,10 +1,19 @@
+import logging
 import os
+import sys
 import unittest
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
 from gemini_client import GeminiClient, GeminiClientError
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+log = logging.getLogger(__name__)
 load_dotenv()
 
 
@@ -12,14 +21,14 @@ def _is_gemini_enabled() -> bool:
     try:
         import google.generativeai  # noqa: F401
     except ImportError:
-        print("Skipping Gemini integration test: google-generativeai not installed.")
+        log.warning("Skipping Gemini integration test: google-generativeai not installed.")
         return False
 
     for env_var in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
         if os.getenv(env_var):
             return True
 
-    print("Skipping Gemini integration test: GOOGLE_API_KEY/GEMINI_API_KEY not set.")
+    log.warning("Skipping Gemini integration test: GOOGLE_API_KEY/GEMINI_API_KEY not set.")
     return False
 
 
@@ -37,11 +46,11 @@ class GeminiClientIntegrationTest(unittest.TestCase):
         except (ValueError, GeminiClientError) as exc:
             message = str(exc)
             if "finish_reason" in message:
-                print(f"Skipping Gemini integration test: {message}")
+                log.warning(f"Skipping Gemini integration test: {message}")
                 self.skipTest(f"Gemini returned unfinished response: {message}")
             raise
 
-        print("Gemini explanation output:\n", explanation)
+        log.info("Gemini explanation output:\n%s", explanation)
         self.assertTrue(explanation.strip())
 
 

@@ -1,4 +1,6 @@
+import logging
 import os
+import sys
 import unittest
 from datetime import datetime, timezone
 
@@ -7,13 +9,20 @@ from dotenv import load_dotenv
 
 from notifications.slack import SlackNotifier
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+log = logging.getLogger(__name__)
+
 load_dotenv()
 
 
 def _is_integration_enabled() -> bool:
     enabled = bool(os.getenv("SLACK_WEBHOOK_URL"))
     if not enabled:
-        print("Skipping Slack integration test: SLACK_WEBHOOK_URL not set.")
+        log.warning("Skipping Slack integration test: SLACK_WEBHOOK_URL not set.")
     return enabled
 
 

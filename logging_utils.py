@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
 from loguru import logger
 
@@ -22,7 +23,7 @@ def configure_logging(log_dir: Path, log_name: str, rotation: str = "1 week") ->
         diagnose=True,
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {message}",
     )
-    logger.add(lambda msg: print(msg, end=""), level="INFO")
+    logger.add(sys.stdout, level="INFO")
 
 
 def get_logger(log_dir: Path, log_name: str):
