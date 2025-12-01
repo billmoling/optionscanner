@@ -55,6 +55,8 @@ services:
       # Build your app from the Dockerfile in the current directory
       build: .
       env_file: .env
+      volumes:
+        - ./config.yaml:/app/config.yaml
       # Command to run the scanner on the configured schedule
       command: >
         python main.py 
