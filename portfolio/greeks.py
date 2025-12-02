@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from typing import Dict, Optional, Tuple
 
 import pandas as pd
@@ -82,6 +83,9 @@ class GreekCalculator:
                 )
                 continue
             try:
+                contract = self._qualify_contract(contract)
+                if contract is None:
+                    continue
                 ticker = self._ib.reqMktData(contract, "", True, False)
                 try:
                     self._ib.sleep(0.1)
@@ -108,7 +112,7 @@ class GreekCalculator:
                 )
 
     def _build_option_contract(self, row: pd.Series) -> Option:
-        expiry = str(row.get("expiry", ""))
+        expiry = self._format_expiry(row.get("expiry", ""))
         symbol = str(row.get("underlying") or row.get("symbol") or "")
         if not symbol:
             raise ValueError("missing symbol")
@@ -136,6 +140,41 @@ class GreekCalculator:
             currency="USD",
         )
         return contract
+
+    def _qualify_contract(self, contract: Option) -> Optional[Option]:
+        try:
+            qualified = self._ib.qualifyContracts(contract)
+        except Exception as exc:
+            logger.warning(
+                "Failed to qualify contract for greeks | symbol={symbol} expiry={expiry} strike={strike} reason={error}",
+                symbol=contract.symbol,
+                expiry=contract.lastTradeDateOrContractMonth,
+                strike=contract.strike,
+                error=exc,
+            )
+            return None
+        if not qualified:
+            logger.warning(
+                "No qualified contract returned | symbol={symbol} expiry={expiry} strike={strike}",
+                symbol=contract.symbol,
+                expiry=contract.lastTradeDateOrContractMonth,
+                strike=contract.strike,
+            )
+            return None
+        return qualified[0]
+
+    @staticmethod
+    def _format_expiry(expiry_value: object) -> str:
+        if isinstance(expiry_value, (pd.Timestamp, datetime)):
+            return expiry_value.strftime("%Y%m%d")
+        if isinstance(expiry_value, date):
+            return expiry_value.strftime("%Y%m%d")
+        if isinstance(expiry_value, str):
+            cleaned = expiry_value.strip()
+            if "-" in cleaned:
+                cleaned = cleaned.replace("-", "")
+            return cleaned
+        return str(expiry_value or "")
 
 
 def compute_concentration(positions: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:

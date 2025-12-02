@@ -2,6 +2,7 @@ nautilus_trader
 pandas
 ib_async
 loguru
+python-logging-loki
 asyncio
 pyyaml
 google-generativeai

@@ -16,7 +16,7 @@ log_dir: "./logs"
 data_dir: "./data"
 enable_gemini: true
 gemini:
-  model_name: "gemini-2.0-flash"
+  model_name: "gemini-2.5-flash"
 stock_data:
   enabled: true
   client_id_offset: 25
@@ -34,9 +34,9 @@ strategies:
       min_days_to_expiry: 18
       max_days_to_expiry: 38
       spread_width: 5.0
-      min_credit: 0.6
-      short_target_delta: 0.23
-      short_otm_pct: 0.04
+      min_credit: 0.55
+      short_target_delta: 0.25
+      short_otm_pct: 0.035
   VerticalSpreadStrategy:
     params:
       spread_width: 5.0
@@ -53,31 +53,31 @@ strategies:
       enabled: false
   IronCondorStrategy:
     params:
-      target_delta: 0.16
-      premium_threshold: 1.0
-      min_credit_pct: 0.01
-      max_expiries_per_symbol: 3
-      delta_tolerance: 0.05
-      spread_width: 10.0
+      target_delta: 0.18
+      premium_threshold: 0.5
+      min_credit_pct: 0.0025
+      max_expiries_per_symbol: 4
+      delta_tolerance: 0.1
+      spread_width: 5.0
       allowed_symbols:
         - SPY
         - QQQ
         - IWM
   PoorMansCoveredCallStrategy:
     params:
-      leaps_min_days: 240
-      leaps_delta_threshold: 0.7
-      leaps_max_strike_pct: 0.9
-      max_leaps_extrinsic_pct: 0.35
-      leaps_max_theta_abs: 0.04
-      short_min_days: 21
-      short_max_days: 60
-      short_otm_pct: 0.05
+      leaps_min_days: 180
+      leaps_delta_threshold: 0.6
+      leaps_max_strike_pct: 0.95
+      max_leaps_extrinsic_pct: 0.45
+      leaps_max_theta_abs: 0.06
+      short_min_days: 18
+      short_max_days: 65
+      short_otm_pct: 0.03
       short_delta_range:
-        - 0.2
-        - 0.45
-      short_min_theta_abs: 0.04
-      min_return_on_capital: 0.08
+        - 0.15
+        - 0.5
+      short_min_theta_abs: 0.02
+      min_return_on_capital: 0.05
       max_trade_ideas: 5
 schedule:
   times:

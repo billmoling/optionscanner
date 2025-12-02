@@ -93,7 +93,14 @@ class SignalBatchSelector:
 
         for candidate in candidates:
             try:
-                data = json.loads(candidate.strip())
+                cleaned = candidate.strip()
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[len("json") :].strip()
+                start = cleaned.find("{")
+                end = cleaned.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    cleaned = cleaned[start : end + 1]
+                data = json.loads(cleaned)
                 selections = self._extract_selections(data)
                 if selections:
                     return selections
