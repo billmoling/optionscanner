@@ -166,9 +166,11 @@ def execute_portfolio_manager(
 def main(argv: Optional[List[str]] = None) -> None:
     load_dotenv()
     args = parse_args(argv)
+    run_mode = RunMode(args.run_mode)
+    os.environ.setdefault("APP_RUN_MODE", run_mode.value)
     config = load_config(args.config)
     log_dir = Path(config.get("log_dir", "./logs"))
-    configure_logging(log_dir, "strategy_signals")
+    configure_logging(log_dir, "strategy_signals", run_mode=run_mode.value)
 
     enable_gemini = bool(config.get("enable_gemini", True))
     portfolio_only = bool(args.portfolio_only)
@@ -179,7 +181,6 @@ def main(argv: Optional[List[str]] = None) -> None:
     if not portfolio_only:
         strategies = discover_strategies(strategy_overrides)
     symbols: Sequence[str] = config.get("tickers", [])
-    run_mode = RunMode(args.run_mode)
     data_dir = Path(config.get("data_dir", "./data"))
     ibkr_settings = config.get("ibkr") or {}
     portfolio_settings = dict(config.get("portfolio", {}))
