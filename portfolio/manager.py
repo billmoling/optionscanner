@@ -53,6 +53,7 @@ class PortfolioManager:
         self.concentration: pd.DataFrame = pd.DataFrame()
         self.breaches: List[RiskBreach] = []
         self.actions: List[str] = []
+        self.last_gemini_response: Optional[str] = None
 
     def _load_config(self) -> Dict[str, dict]:
         if not self._config_path.exists():
@@ -111,7 +112,9 @@ class PortfolioManager:
             csv_path, _json_unused, timestamp = self._reporter.write_outputs(
                 self.positions, self.greek_summary.per_symbol
             )
-            self._reporter.evaluate_positions_with_gemini(self.positions, timestamp)
+            self.last_gemini_response = self._reporter.evaluate_positions_with_gemini(
+                self.positions, timestamp
+            )
         except Exception as exc:
             logger.warning("Failed to write portfolio CSV | reason={error}", error=exc)
             csv_path = None

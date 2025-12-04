@@ -149,6 +149,43 @@ Each strategy signal now populates a lightweight `position_cache.json` file unde
 
 Need bespoke criteria? Register your own exit evaluator by calling `PositionCache.register_evaluator("MY_DIRECTION", func)` before the run; each evaluator receives the cached entry, the latest snapshot, and `datetime.utcnow()` so you can encode custom roll triggers per strategy.
 
+## AI-driven execution and portfolio automation
+
+The manual Slack-only flow (`generate signal → notify Slack → run portfolio analysis → notify Slack`) can be upgraded to a fully automated, AI-supervised workflow while still broadcasting every decision to Slack for visibility. Enable the automation block in `config.yaml` to switch the orchestrator into hands-off mode:
+
+```yaml
+automation:
+  enabled: true            # master kill switch; disable to fall back to Slack-only
+  trade_execution:
+    enabled: true          # turn AI finalists into IBKR orders
+    default_quantity: 1
+    limit_padding_pct: 0.05
+    max_spread_pct: 0.6    # skip fills when the quoted spread is wider than this
+  portfolio_execution:
+    enabled: true          # act on Gemini portfolio responses
+    max_positions: 3       # cap auto-closes per run
+    use_market_orders: false
+```
+
+1. **Signal finalist → execution.** After strategies emit candidate signals and the AI agent selects a finalist, the AI output is handed to a **Trade Executor** service that translates the suggestion into IBKR order objects (contract lookup, side, quantity, limit/stop params, time-in-force, account). The executor calls the IBKR API immediately, returning execution status/IDs to the orchestrator and posting a Slack summary with links to order IDs.
+2. **Portfolio suggestion → execution.** The portfolio monitor streams positions/Greeks to the AI agent. When the AI returns rebalance/hedge instructions (rolls, closes, delta hedges, cash targets), a **Portfolio Executor** converts each instruction into the required IBKR calls (modify/cancel existing orders, adjust allocations, open hedges) and runs them in sequence or batch. Slack receives a pre-trade summary and a post-trade status update.
+
+### Component and sequence changes
+
+* **Orchestrator enhancements:** Add a light orchestration layer (async task queue or event bus) that chains `Signal → AI finalist → Trade Executor` and `Portfolio snapshot → AI recommendation → Portfolio Executor` without human intervention. Persist correlation IDs so Slack, AI responses, and IBKR order tickets are traceable.
+* **Execution adapters:** Implement dedicated adapters for IBKR (order placement, order modification, portfolio info) decoupled from AI payload formats. Include schema validation and unit normalization so AI outputs cannot emit malformed IBKR orders.
+* **State + idempotency:** Store execution state (pending, submitted, filled, failed) and AI decision metadata in a durable store to avoid duplicate orders on retries/restarts. Gate replays by checking recent fills against the correlation ID and contract hash.
+* **Guardrails:** Enforce pre-trade risk checks (max notional/Greeks, concentration, trading window, paper vs. live mode) before any IBKR call. Reject or downsize trades that violate policy even if the AI requested them.
+* **Error handling and fallbacks:** Surface IBKR rejections/timeouts back to the orchestrator for retries or AI re-planning. Keep Slack alerts for each failure with actionable context (contract, reason, retry schedule).
+* **Observability:** Emit structured logs/metrics (latency per step, IBKR error codes, AI latency) and capture full audit trails (AI prompt/response, final order payload, IBKR orderId) for compliance.
+
+### Integration challenges to plan for
+
+* **IBKR session management:** Ensure the gateway is healthy and authenticated before firing orders; auto-reconnect and block new executions when the session is degraded.
+* **Latency and sequencing:** AI calls can be slower than order routing; use timeouts and freshness checks so signals/portfolio snapshots are still valid when the IBKR call occurs.
+* **Position parity:** Continuously reconcile live IBKR positions with the local `position_cache` so the AI and executors act on consistent data, especially after partial fills or manual interventions.
+* **Permissioning and safety switches:** Keep a global "circuit breaker" and per-strategy kill switches to revert to Slack-only mode if anomalies are detected. Maintain paper/live separation with explicit configuration and environment overrides.
+
 ## Running tests
 
 The project ships with focused unit tests for AI agents, strategy logic, and Slack notifications. Execute the full suite with:

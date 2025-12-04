@@ -13,6 +13,7 @@ from loguru import logger
 from zoneinfo import ZoneInfo
 
 from ai_agents import BatchSelectionResult, SignalBatchSelector
+from execution import TradeExecutor
 from notifications import SlackNotifier
 from option_data import BaseDataFetcher, OptionChainSnapshot
 from position_cache import ExitRecommendation, PositionCache
@@ -35,6 +36,7 @@ async def run_once(
     stock_fetcher: Optional[StockDataFetcher] = None,
     indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
     stock_history_kwargs: Optional[Dict[str, Any]] = None,
+    trade_executor: Optional[TradeExecutor] = None,
 ) -> None:
     symbol_list = list(symbols)
     underlying_context: Dict[str, Dict[str, Any]] = {}
@@ -151,12 +153,23 @@ async def run_once(
             logger.warning("Failed to persist Gemini selection output", exc_info=True)
 
     finalists_df = df[df["gemini_selected"] == True] if "gemini_selected" in df.columns else df.iloc[0:0]
+    finalist_payload: List[Tuple[str, TradeSignal, Optional[float], Optional[str]]] = []
+    for idx, (strategy_name, signal) in enumerate(aggregated_signals, start=1):
+        selection = finalist_map.get(idx)
+        if selection:
+            finalist_payload.append((strategy_name, signal, selection.score, selection.reason))
+
     if slack_notifier:
         loop = asyncio.get_running_loop()
         if finalists_df.empty:
             logger.info("No Gemini-selected finalists to send to Slack")
         else:
             await loop.run_in_executor(None, slack_notifier.send_signals, finalists_df, file_path)
+    if trade_executor and finalist_payload:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, trade_executor.execute_finalists, finalist_payload, snapshot_by_symbol
+        )
 
 
 async def _fetch_underlying_context(
@@ -264,6 +277,7 @@ async def run_scheduler(
     indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
     stock_history_kwargs: Optional[Dict[str, Any]] = None,
     post_run: Optional[Callable[[], None]] = None,
+    trade_executor: Optional[TradeExecutor] = None,
 ) -> None:
     schedule_config = config.get("schedule", {})
     scheduled_times = parse_schedule_times(schedule_config)
@@ -308,6 +322,7 @@ async def run_scheduler(
                     stock_fetcher=stock_fetcher,
                     indicator_processor=indicator_processor,
                     stock_history_kwargs=stock_history_kwargs,
+                    trade_executor=trade_executor,
                 )
             if post_run is not None:
                 try:

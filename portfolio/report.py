@@ -157,10 +157,10 @@ class PortfolioReporter:
         logger.debug("Gemini summary skipped: disabled for portfolio summaries")
         return
 
-    def evaluate_positions_with_gemini(self, positions: pd.DataFrame, timestamp: str) -> None:
+    def evaluate_positions_with_gemini(self, positions: pd.DataFrame, timestamp: str) -> Optional[str]:
         if positions.empty:
             logger.debug("Gemini position evaluation skipped: no positions")
-            return
+            return None
         logger.info(
             "Preparing Gemini position evaluation | positions={count} enable_gemini={enabled} timestamp={ts}",
             count=len(positions.index),
@@ -235,7 +235,7 @@ class PortfolioReporter:
 
         if not self._enable_gemini:
             logger.debug("Gemini position evaluation skipped: disabled in config")
-            return
+            return None
         try:
             if self._gemini is None:
                 logger.debug("Initialising Gemini client for portfolio evaluation")
@@ -259,10 +259,12 @@ class PortfolioReporter:
             }
             result_path.write_text(json.dumps(result_payload, indent=2), encoding="utf-8")
             self._send_gemini_slack_message(response, timestamp)
+            return response
         except GeminiClientError as exc:
             logger.warning("Gemini client unavailable for position analysis: {error}", error=exc)
         except Exception as exc:
             logger.warning("Gemini position analysis failed: {error}", error=exc)
+        return None
 
 
 __all__ = ["PortfolioReporter", "ReporterConfig"]
