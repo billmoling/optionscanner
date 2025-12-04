@@ -94,3 +94,17 @@ slack:
   icon_emoji: ":chart_with_upwards_trend:"
   title: "Daily Option Scanner Signals"
   max_rows: 30
+automation:
+  enabled: true
+  trade_execution:
+    enabled: true
+    default_quantity: 1
+    limit_padding_pct: 0.05
+    max_spread_pct: 0.6
+    max_orders: 5
+    allow_market_fallback: true
+  portfolio_execution:
+    enabled: true
+    max_positions: 5
+    use_market_orders: false
+    limit_padding_pct: 0.03
