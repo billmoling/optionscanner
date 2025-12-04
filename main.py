@@ -18,6 +18,12 @@ from loguru import logger
 
 from dotenv import load_dotenv
 from logging_utils import configure_logging
+from execution import (
+    PortfolioActionExecutor,
+    PortfolioExecutionConfig,
+    TradeExecutionConfig,
+    TradeExecutor,
+)
 from notifications import SlackNotifier
 from option_data import IBKRDataFetcher, MARKET_DATA_TYPE_CODES
 from portfolio.manager import PortfolioManager
@@ -142,6 +148,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def execute_portfolio_manager(
     fetcher: IBKRDataFetcher,
     portfolio_config: Dict[str, Any],
+    portfolio_executor: Optional[PortfolioActionExecutor] = None,
 ) -> None:
     """Run the portfolio manager workflow with the provided fetcher."""
     try:
@@ -158,6 +165,10 @@ def execute_portfolio_manager(
         manager.evaluate_rules()
         manager.generate_actions()
         message = manager.notify()
+        if portfolio_executor and manager.last_gemini_response:
+            portfolio_executor.execute_ai_response(
+                manager.positions, manager.last_gemini_response
+            )
         logger.info("Portfolio manager summary:\n{message}", message=message)
     except Exception:
         logger.exception("Portfolio manager execution failed")
@@ -176,6 +187,28 @@ def main(argv: Optional[List[str]] = None) -> None:
     portfolio_only = bool(args.portfolio_only)
     results_dir = Path(config.get("results_dir", "./results"))
     slack_notifier = SlackNotifier(config.get("slack"))
+    automation_settings = config.get("automation", {})
+    automation_enabled = bool(automation_settings.get("enabled", False))
+    trade_executor: Optional[TradeExecutor] = None
+    portfolio_executor: Optional[PortfolioActionExecutor] = None
+
+    trade_exec_settings = automation_settings.get("trade_execution", {})
+    trade_exec_config = TradeExecutionConfig(
+        enabled=automation_enabled and bool(trade_exec_settings.get("enabled", False)),
+        default_quantity=int(trade_exec_settings.get("default_quantity", 1)),
+        limit_padding_pct=float(trade_exec_settings.get("limit_padding_pct", 0.05)),
+        max_orders=int(trade_exec_settings.get("max_orders", 5)),
+        max_spread_pct=float(trade_exec_settings.get("max_spread_pct", 0.6)),
+        allow_market_fallback=bool(trade_exec_settings.get("allow_market_fallback", True)),
+    )
+
+    portfolio_exec_settings = automation_settings.get("portfolio_execution", {})
+    portfolio_exec_config = PortfolioExecutionConfig(
+        enabled=automation_enabled and bool(portfolio_exec_settings.get("enabled", False)),
+        max_positions=int(portfolio_exec_settings.get("max_positions", 5)),
+        use_market_orders=bool(portfolio_exec_settings.get("use_market_orders", False)),
+        limit_padding_pct=float(portfolio_exec_settings.get("limit_padding_pct", 0.03)),
+    )
     strategies: List[BaseOptionStrategy] = []
     strategy_overrides = config.get("strategies")
     if not portfolio_only:
@@ -204,6 +237,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         data_dir=data_dir,
         market_data_type=args.market_data,
     )
+    if trade_exec_config.enabled:
+        trade_executor = TradeExecutor(fetcher.ib, trade_exec_config, slack_notifier)
+    if portfolio_exec_config.enabled:
+        portfolio_executor = PortfolioActionExecutor(fetcher.ib, portfolio_exec_config, slack_notifier)
 
     stock_fetcher: Optional[StockDataFetcher] = None
     indicator_processor: Optional[TechnicalIndicatorProcessor] = None
@@ -253,7 +290,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         if disable_portfolio_manager and not portfolio_only:
             logger.info("Portfolio manager disabled via DISABLE_PORTFOLIO_MANAGER")
             return
-        execute_portfolio_manager(fetcher, portfolio_settings)
+        execute_portfolio_manager(fetcher, portfolio_settings, portfolio_executor)
 
     post_run = maybe_run_portfolio_manager if not disable_portfolio_manager else None
 
@@ -274,6 +311,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                     stock_fetcher=stock_fetcher,
                     indicator_processor=indicator_processor,
                     stock_history_kwargs=stock_history_kwargs,
+                    trade_executor=trade_executor,
                     post_run=post_run if portfolio_only or not disable_portfolio_manager else None,
                 )
             )
@@ -285,7 +323,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         logger.info("Portfolio-only mode enabled; skipping option scanner execution.")
         try:
             asyncio.run(fetcher.connect())
-            execute_portfolio_manager(fetcher, portfolio_settings)
+            execute_portfolio_manager(fetcher, portfolio_settings, portfolio_executor)
         finally:
             try:
                 asyncio.run(fetcher.disconnect())
@@ -305,6 +343,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 stock_fetcher=stock_fetcher,
                 indicator_processor=indicator_processor,
                 stock_history_kwargs=stock_history_kwargs,
+                trade_executor=trade_executor,
             )
         )
         maybe_run_portfolio_manager(fetcher)
