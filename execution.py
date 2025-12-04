@@ -65,6 +65,12 @@ class TradeExecutor:
         finalists: Sequence[Tuple[str, TradeSignal, Optional[float], Optional[str]]],
         snapshots: Dict[str, OptionChainSnapshot],
     ) -> List[str]:
+        logger.info(
+            "Starting finalist execution run | enabled={enabled} finalists={count} max_orders={max_orders}",
+            enabled=self._config.enabled,
+            count=len(finalists),
+            max_orders=self._config.max_orders,
+        )
         if not self._config.enabled:
             logger.debug("Trade executor disabled; skipping finalist execution")
             return []
@@ -96,6 +102,11 @@ class TradeExecutor:
                 self._slack._post(self._slack.settings.webhook_url, payload)
             except Exception:
                 logger.warning("Failed to post finalist executions to Slack", exc_info=True)
+        logger.info(
+            "Finished finalist execution run | executed={executed} finalists={count}",
+            executed=len(reports),
+            count=len(finalists),
+        )
         return reports
 
     def _build_plan(
@@ -219,6 +230,12 @@ class PortfolioActionExecutor:
         self._slack = slack
 
     def execute_ai_response(self, positions: pd.DataFrame, response: Optional[str]) -> List[str]:
+        logger.info(
+            "Starting portfolio execution run | enabled={enabled} positions={positions} has_response={has_response}",
+            enabled=self._config.enabled,
+            positions=len(positions) if positions is not None else 0,
+            has_response=bool(response),
+        )
         if not self._config.enabled:
             logger.debug("Portfolio executor disabled; skipping execution")
             return []
@@ -245,6 +262,11 @@ class PortfolioActionExecutor:
                 self._slack._post(self._slack.settings.webhook_url, payload)
             except Exception:
                 logger.warning("Failed to post portfolio executions to Slack", exc_info=True)
+        logger.info(
+            "Finished portfolio execution run | executed={executed} targets={targets}",
+            executed=len(reports),
+            targets=len(targets),
+        )
         return reports
 
     def _extract_targets(self, positions: pd.DataFrame, response: str) -> pd.DataFrame:
