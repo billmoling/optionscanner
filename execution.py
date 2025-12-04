@@ -120,6 +120,17 @@ class TradeExecutor:
                 logger.warning("Unable to resolve option right for signal | signal={signal}", signal=signal)
                 return None
             contract = Option(signal.symbol, expiry_str, float(signal.strike), right, "SMART", currency="USD")
+            qualified = self._ib.qualifyContracts(contract)
+            if not qualified:
+                logger.warning(
+                    "Failed to qualify option contract; skipping order | symbol={symbol} expiry={expiry} strike={strike} right={right}",
+                    symbol=signal.symbol,
+                    expiry=expiry_str,
+                    strike=signal.strike,
+                    right=right,
+                )
+                return None
+            contract = qualified[0]
             quantity = max(int(self._config.default_quantity), 1)
             limit_price = self._derive_price(signal, snapshot)
             side = self._resolve_side(signal.direction)
