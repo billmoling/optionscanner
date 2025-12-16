@@ -9,7 +9,7 @@ from loguru import logger
 
 from market_state import MarketState, MarketStateProvider
 
-from .base import BaseOptionStrategy, TradeSignal
+from .base import BaseOptionStrategy, SignalLeg, TradeSignal
 
 
 class VerticalSpreadStrategy(BaseOptionStrategy):
@@ -201,6 +201,20 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
                 option_type=option_type,
                 direction=direction,
                 rationale=rationale,
+                legs=(
+                    SignalLeg(
+                        action="BUY",
+                        option_type=option_type,
+                        strike=float(atm_leg["strike"]),
+                        expiry=expiry,
+                    ),
+                    SignalLeg(
+                        action="SELL",
+                        option_type=option_type,
+                        strike=float(short_leg["strike"]),
+                        expiry=expiry,
+                    ),
+                ),
             )
         )
 

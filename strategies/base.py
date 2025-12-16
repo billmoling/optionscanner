@@ -5,7 +5,7 @@ import abc
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Iterable, List, Optional
+from typing import Any, Iterable, List, Optional, Tuple
 
 from loguru import logger
 
@@ -18,6 +18,17 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 
 
 @dataclass(slots=True)
+class SignalLeg:
+    """Represents an individual option leg within a multi-leg idea."""
+
+    action: str  # BUY / SELL
+    option_type: str
+    strike: float
+    expiry: datetime
+    quantity: int = 1
+
+
+@dataclass(slots=True)
 class TradeSignal:
     """Represents a trade signal emitted by a strategy."""
 
@@ -27,6 +38,7 @@ class TradeSignal:
     option_type: str
     direction: str
     rationale: str
+    legs: Tuple[SignalLeg, ...] = ()
 
 
 class BaseOptionStrategy(Strategy, abc.ABC):
@@ -48,13 +60,14 @@ class BaseOptionStrategy(Strategy, abc.ABC):
         """Utility for logging and returning signals."""
 
         logger.info(
-            "Signal emitted | strategy={strategy} symbol={symbol} strike={strike} expiry={expiry} type={opt_type} direction={direction} rationale={rationale}",
+            "Signal emitted | strategy={strategy} symbol={symbol} strike={strike} expiry={expiry} type={opt_type} direction={direction} legs={legs} rationale={rationale}",
             strategy=self.name,
             symbol=signal.symbol,
             strike=signal.strike,
             expiry=signal.expiry.isoformat(),
             opt_type=signal.option_type,
             direction=signal.direction,
+            legs=len(signal.legs) or 0,
             rationale=signal.rationale,
         )
         return signal
@@ -96,4 +109,4 @@ class BaseOptionStrategy(Strategy, abc.ABC):
             return None
 
 
-__all__ = ["BaseOptionStrategy", "TradeSignal"]
+__all__ = ["BaseOptionStrategy", "SignalLeg", "TradeSignal"]

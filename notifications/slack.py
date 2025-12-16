@@ -98,6 +98,12 @@ class SlackNotifier:
         for label, value in summary_fields.items():
             if value not in (None, ""):
                 lines.append(f"{label}: {value}")
+        legs = row.get("legs")
+        leg_lines = self._format_legs(legs)
+        if leg_lines:
+            lines.append("")
+            lines.append("Legs:")
+            lines.extend(leg_lines)
         explanation = row.get("explanation")
         if explanation:
             lines.append("")
@@ -189,3 +195,33 @@ class SlackNotifier:
                     return candidate
 
         return ""
+
+    def _format_legs(self, raw: object) -> List[str]:
+        """Render a human-readable leg breakdown from DataFrame/JSON payloads."""
+        legs: List[Dict[str, object]] = []
+        if isinstance(raw, (list, tuple)):
+            legs = [
+                leg for leg in raw if isinstance(leg, dict)
+            ]
+        elif isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    legs = [leg for leg in parsed if isinstance(leg, dict)]
+            except Exception:
+                legs = []
+        if not legs:
+            return []
+        lines: List[str] = []
+        for leg in legs:
+            action = str(leg.get("action", "")).upper()
+            option_type = str(leg.get("option_type", "")).upper()
+            strike = leg.get("strike")
+            expiry = leg.get("expiry")
+            parts = [action or "?", option_type or "?"]
+            if strike not in (None, ""):
+                parts.append(f"{strike}")
+            if expiry not in (None, ""):
+                parts.append(f"exp {expiry}")
+            lines.append(" ".join(parts))
+        return lines

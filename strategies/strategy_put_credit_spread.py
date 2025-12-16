@@ -9,7 +9,7 @@ from loguru import logger
 
 from market_state import MarketState, MarketStateProvider
 
-from .base import BaseOptionStrategy, TradeSignal
+from .base import BaseOptionStrategy, SignalLeg, TradeSignal
 
 
 class PutCreditSpreadStrategy(BaseOptionStrategy):
@@ -134,6 +134,20 @@ class PutCreditSpreadStrategy(BaseOptionStrategy):
                 option_type="PUT",
                 direction="BULL_PUT_CREDIT_SPREAD",
                 rationale=rationale,
+                legs=(
+                    SignalLeg(
+                        action="SELL",
+                        option_type="PUT",
+                        strike=float(short_put["strike"]),
+                        expiry=expiry,
+                    ),
+                    SignalLeg(
+                        action="BUY",
+                        option_type="PUT",
+                        strike=float(long_put["strike"]),
+                        expiry=expiry,
+                    ),
+                ),
             )
         )
 

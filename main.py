@@ -197,6 +197,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         enabled=automation_enabled and bool(trade_exec_settings.get("enabled", False)),
         default_quantity=int(trade_exec_settings.get("default_quantity", 1)),
         limit_padding_pct=float(trade_exec_settings.get("limit_padding_pct", 0.05)),
+        max_limit_deviation_pct=float(trade_exec_settings.get("max_limit_deviation_pct", 0.03)),
         max_orders=int(trade_exec_settings.get("max_orders", 5)),
         max_spread_pct=float(trade_exec_settings.get("max_spread_pct", 0.6)),
         allow_market_fallback=bool(trade_exec_settings.get("allow_market_fallback", True)),

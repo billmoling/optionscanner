@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import pandas as pd
 from loguru import logger
 
-from .base import BaseOptionStrategy, TradeSignal
+from .base import BaseOptionStrategy, SignalLeg, TradeSignal
 
 
 class IronCondorStrategy(BaseOptionStrategy):
@@ -117,6 +117,7 @@ class IronCondorStrategy(BaseOptionStrategy):
             rationale = condor["rationale"]
             expiry = condor["expiry"]
             symbol = condor["symbol"]
+            legs = self._condor_legs(condor)
 
             def add_signal(option_row: pd.Series, direction: str) -> None:
                 signals.append(
@@ -128,6 +129,7 @@ class IronCondorStrategy(BaseOptionStrategy):
                             option_type=str(option_row["option_type"]),
                             direction=direction,
                             rationale=rationale,
+                            legs=legs,
                         )
                     )
                 )
@@ -305,4 +307,33 @@ class IronCondorStrategy(BaseOptionStrategy):
             symbol=symbol,
             expiry=expiry.isoformat() if hasattr(expiry, "isoformat") else expiry,
             context=metrics or None,
+        )
+
+    def _condor_legs(self, condor: Dict[str, Any]) -> Tuple[SignalLeg, SignalLeg, SignalLeg, SignalLeg]:
+        expiry = condor.get("expiry")
+        return (
+            SignalLeg(
+                action="SELL",
+                option_type="CALL",
+                strike=float(condor["short_call"]["strike"]),
+                expiry=expiry,
+            ),
+            SignalLeg(
+                action="BUY",
+                option_type="CALL",
+                strike=float(condor["long_call"]["strike"]),
+                expiry=expiry,
+            ),
+            SignalLeg(
+                action="SELL",
+                option_type="PUT",
+                strike=float(condor["short_put"]["strike"]),
+                expiry=expiry,
+            ),
+            SignalLeg(
+                action="BUY",
+                option_type="PUT",
+                strike=float(condor["long_put"]["strike"]),
+                expiry=expiry,
+            ),
         )

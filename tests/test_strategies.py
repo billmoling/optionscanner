@@ -48,6 +48,7 @@ class CoveredCallStrategyTests(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0].symbol, "NVDA")
         self.assertEqual(signals[0].option_type, "CALL")
+        self.assertEqual(len(signals[0].legs), 1)
 
 
 class VerticalSpreadStrategyTests(unittest.TestCase):
@@ -68,6 +69,7 @@ class VerticalSpreadStrategyTests(unittest.TestCase):
         self.assertGreaterEqual(len(signals), 2)
         self.assertTrue(any(signal.option_type == "CALL" for signal in signals))
         self.assertTrue(any(signal.option_type == "PUT" for signal in signals))
+        self.assertTrue(all(len(signal.legs) == 2 for signal in signals))
 
     def test_respects_bull_state(self) -> None:
         now = datetime.now(timezone.utc)
@@ -89,6 +91,7 @@ class VerticalSpreadStrategyTests(unittest.TestCase):
 
         self.assertTrue(signals)
         self.assertTrue(all(signal.option_type == "CALL" for signal in signals))
+        self.assertTrue(all(len(signal.legs) == 2 for signal in signals))
 
     def test_allows_uptrend_state_for_bullish_spreads(self) -> None:
         now = datetime.now(timezone.utc)
@@ -109,6 +112,7 @@ class VerticalSpreadStrategyTests(unittest.TestCase):
 
         self.assertTrue(signals)
         self.assertTrue(all(signal.option_type == "CALL" for signal in signals))
+        self.assertTrue(all(len(signal.legs) == 2 for signal in signals))
 
     def test_respects_bear_state(self) -> None:
         now = datetime.now(timezone.utc)
@@ -130,6 +134,7 @@ class VerticalSpreadStrategyTests(unittest.TestCase):
 
         self.assertTrue(signals)
         self.assertTrue(all(signal.option_type == "PUT" for signal in signals))
+        self.assertTrue(all(len(signal.legs) == 2 for signal in signals))
 
 
 class IronCondorStrategyTests(unittest.TestCase):
@@ -188,6 +193,7 @@ class IronCondorStrategyTests(unittest.TestCase):
             directions,
             {"SHORT_CONDOR_CALL", "LONG_CONDOR_CALL", "SHORT_CONDOR_PUT", "LONG_CONDOR_PUT"},
         )
+        self.assertTrue(all(len(signal.legs) == 4 for signal in signals))
 
 
 class PoorMansCoveredCallStrategyTests(unittest.TestCase):
@@ -225,6 +231,7 @@ class PoorMansCoveredCallStrategyTests(unittest.TestCase):
         self.assertEqual(len(signals), 2)
         directions = {signal.direction for signal in signals}
         self.assertSetEqual(directions, {"LONG_PMCC_LEAPS", "SHORT_PMCC_CALL"})
+        self.assertTrue(all(len(signal.legs) == 2 for signal in signals))
 
 
 class PutCreditSpreadStrategyTests(unittest.TestCase):
@@ -248,6 +255,7 @@ class PutCreditSpreadStrategyTests(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0].option_type, "PUT")
         self.assertEqual(signals[0].direction, "BULL_PUT_CREDIT_SPREAD")
+        self.assertEqual(len(signals[0].legs), 2)
 
     def test_respects_market_state_filter(self) -> None:
         now = datetime.now(timezone.utc)

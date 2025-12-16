@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 import pandas as pd
 from loguru import logger
 
-from .base import BaseOptionStrategy, TradeSignal
+from .base import BaseOptionStrategy, SignalLeg, TradeSignal
 
 
 class PoorMansCoveredCallStrategy(BaseOptionStrategy):
@@ -256,6 +256,20 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
         leaps_expiry = pd.Timestamp(leaps["expiry"]).to_pydatetime()
         short_expiry = pd.Timestamp(short["expiry"]).to_pydatetime()
         symbol = candidate["symbol"]
+        legs = (
+            SignalLeg(
+                action="BUY",
+                option_type="CALL",
+                strike=float(leaps["strike"]),
+                expiry=leaps_expiry,
+            ),
+            SignalLeg(
+                action="SELL",
+                option_type="CALL",
+                strike=float(short["strike"]),
+                expiry=short_expiry,
+            ),
+        )
         rationale = (
             "PMCC idea | net_debit={net:.2f} credit={credit:.2f} ROI={roi:.2%} "
             "annualized={annual:.2%} underlying={underlying:.2f} "
@@ -282,6 +296,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
                     option_type="CALL",
                     direction="LONG_PMCC_LEAPS",
                     rationale=rationale,
+                    legs=legs,
                 )
             ),
             self.emit_signal(
@@ -292,6 +307,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
                     option_type="CALL",
                     direction="SHORT_PMCC_CALL",
                     rationale=rationale,
+                    legs=legs,
                 )
             ),
         ]

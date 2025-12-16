@@ -75,10 +75,12 @@ class SignalBatchSelector:
         ]
         for idx, (strategy, signal) in enumerate(signals, start=1):
             expiry_text = signal.expiry.date().isoformat() if hasattr(signal.expiry, "date") else str(signal.expiry)
+            leg_summary = self._format_leg_summary(signal)
             lines.append(
                 f"{idx}. Strategy: {strategy} | Symbol: {signal.symbol} | Direction: {signal.direction} | "
-                f"Option: {signal.option_type} {signal.strike:.2f} exp {expiry_text} | "
-                f"Rationale: {signal.rationale}"
+                f"Option: {signal.option_type} {signal.strike:.2f} exp {expiry_text}"
+                + (f" | Legs: {leg_summary}" if leg_summary else "")
+                + f" | Rationale: {signal.rationale}"
             )
         lines.append("")
         lines.append("Return JSON only.")
@@ -133,6 +135,18 @@ class SignalBatchSelector:
                 reason = reason.strip()
             selections.append(GeminiSelection(id=idx, score=score, reason=reason or None))
         return selections
+
+    @staticmethod
+    def _format_leg_summary(signal: TradeSignal) -> str:
+        if not getattr(signal, "legs", None):
+            return ""
+        parts = []
+        for leg in signal.legs:
+            parts.append(
+                f"{getattr(leg, 'action', '?')}/{getattr(leg, 'option_type', '?')} "
+                f"{getattr(leg, 'strike', '?')}"
+            )
+        return " / ".join(parts)
 
 
 @dataclass(slots=True)

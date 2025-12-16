@@ -1,6 +1,7 @@
 """Automated execution helpers for AI-directed signals and portfolio actions."""
 from __future__ import annotations
 
+import asyncio
 import math
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +23,7 @@ class TradeExecutionConfig:
     enabled: bool = False
     default_quantity: int = 1
     limit_padding_pct: float = 0.05
+    max_limit_deviation_pct: float = 0.03
     max_orders: int = 5
     max_spread_pct: float = 0.6
     allow_market_fallback: bool = True
@@ -59,6 +61,13 @@ class TradeExecutor:
         self._ib = ib
         self._config = config
         self._slack = slack
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._ib.errorEvent += self._on_ib_error
+        self._ib.orderStatusEvent += self._on_order_status
+
+    def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Attach the running asyncio loop so sync IB calls can hop onto it from threads."""
+        self._loop = loop
 
     def execute_finalists(
         self,
@@ -120,7 +129,7 @@ class TradeExecutor:
                 logger.warning("Unable to resolve option right for signal | signal={signal}", signal=signal)
                 return None
             contract = Option(signal.symbol, expiry_str, float(signal.strike), right, "SMART", currency="USD")
-            qualified = self._ib.qualifyContracts(contract)
+            qualified = self._qualify_contract(contract)
             if not qualified:
                 logger.warning(
                     "Failed to qualify option contract; skipping order | symbol={symbol} expiry={expiry} strike={strike} right={right}",
@@ -131,9 +140,9 @@ class TradeExecutor:
                 )
                 return None
             contract = qualified[0]
-            quantity = max(int(self._config.default_quantity), 1)
-            limit_price = self._derive_price(signal, snapshot)
             side = self._resolve_side(signal.direction)
+            quantity = max(int(self._config.default_quantity), 1)
+            limit_price = self._derive_price(signal, snapshot, side)
             order = self._build_order(side, quantity, limit_price)
             description = (
                 f"{signal.symbol} {right}{signal.strike} exp {expiry_str} qty {quantity} "
@@ -157,7 +166,7 @@ class TradeExecutor:
         return LimitOrder(side, quantity, round(limit_price, 2))
 
     def _derive_price(
-        self, signal: TradeSignal, snapshot: Optional[OptionChainSnapshot]
+        self, signal: TradeSignal, snapshot: Optional[OptionChainSnapshot], side: Optional[str]
     ) -> Optional[float]:
         if snapshot is None:
             return None
@@ -193,7 +202,34 @@ class TradeExecutor:
         if not mid:
             return None
         padding = 1 + self._config.limit_padding_pct
-        return mid * padding
+        price = mid * padding
+
+        max_dev = float(self._config.max_limit_deviation_pct or 0.0)
+        if max_dev > 0 and mid:
+            upper_cap = mid * (1 + max_dev)
+            lower_cap = mid * (1 - max_dev)
+            if (side or "BUY") == "BUY" and price > upper_cap:
+                logger.info(
+                    "Clamped buy limit to deviation cap | symbol={symbol} mid={mid} requested={requested} capped={capped} cap_pct={cap_pct}",
+                    symbol=signal.symbol,
+                    mid=mid,
+                    requested=price,
+                    capped=upper_cap,
+                    cap_pct=max_dev,
+                )
+                price = upper_cap
+            elif (side or "SELL") == "SELL" and price < lower_cap:
+                logger.info(
+                    "Clamped sell limit to deviation cap | symbol={symbol} mid={mid} requested={requested} capped={capped} cap_pct={cap_pct}",
+                    symbol=signal.symbol,
+                    mid=mid,
+                    requested=price,
+                    capped=lower_cap,
+                    cap_pct=max_dev,
+                )
+                price = lower_cap
+
+        return price
 
     @staticmethod
     def _resolve_right(option_type: str) -> Optional[str]:
@@ -215,6 +251,25 @@ class TradeExecutor:
             return "SELL"
         return "BUY"
 
+    def _qualify_contract(self, contract: Option):
+        """
+        Qualify a contract using the IBKR event loop if available; fall back to sync call otherwise.
+        This avoids `asyncio` loop errors when the executor runs in a threadpool.
+        """
+        if self._loop and self._loop.is_running():
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    self._ib.qualifyContractsAsync(contract), self._loop
+                )
+                return future.result()
+            except Exception:
+                logger.warning(
+                    "Async contract qualification failed; falling back to sync | symbol={symbol}",
+                    symbol=contract.symbol,
+                    exc_info=True,
+                )
+        return self._ib.qualifyContracts(contract)
+
     def _submit(self, plan: OrderPlan) -> str:
         try:
             trade = self._ib.placeOrder(plan.contract, plan.order)
@@ -228,6 +283,45 @@ class TradeExecutor:
                 error=exc,
             )
             return f"{plan.description} | failed: {exc}"
+
+    def _on_ib_error(self, req_id: int, code: int, msg: str, advanced: object = None) -> None:
+        logger.warning(
+            "IBKR error | req_id={req_id} code={code} msg={msg} advanced={advanced}",
+            req_id=req_id,
+            code=code,
+            msg=msg,
+            advanced=advanced,
+        )
+
+    def _on_order_status(self, trade) -> None:
+        status_obj = getattr(trade, "orderStatus", None)
+        order = getattr(trade, "order", None)
+        status = getattr(status_obj, "status", "unknown")
+        filled = getattr(status_obj, "filled", None)
+        remaining = getattr(status_obj, "remaining", None)
+        why = getattr(status_obj, "whyHeld", None)
+        order_id = getattr(status_obj, "orderId", None)
+        action = getattr(order, "action", None)
+        if str(status).upper() in {"CANCELLED", "INACTIVE", "APICANCELLED"}:
+            logger.warning(
+                "Order cancelled | orderId={order_id} status={status} action={action} filled={filled} remaining={remaining} why={why}",
+                order_id=order_id,
+                status=status,
+                action=action,
+                filled=filled,
+                remaining=remaining,
+                why=why,
+            )
+        else:
+            logger.debug(
+                "Order status update | orderId={order_id} status={status} action={action} filled={filled} remaining={remaining} why={why}",
+                order_id=order_id,
+                status=status,
+                action=action,
+                filled=filled,
+                remaining=remaining,
+                why=why,
+            )
 
 
 class PortfolioActionExecutor:
@@ -254,7 +348,7 @@ class PortfolioActionExecutor:
             logger.info("Portfolio executor: no AI response to act on")
             return []
         targets = self._extract_targets(positions, response)
-        if not targets:
+        if targets is None or targets.empty:
             logger.info("No actionable portfolio targets detected in AI response")
             return []
         reports: List[str] = []
@@ -281,9 +375,14 @@ class PortfolioActionExecutor:
         return reports
 
     def _extract_targets(self, positions: pd.DataFrame, response: str) -> pd.DataFrame:
+        if positions is None or positions.empty:
+            return positions.iloc[0:0] if positions is not None else pd.DataFrame()
         response_upper = response.upper()
-        symbols = positions.get("underlying") or positions.get("symbol")
-        if symbols is None:
+        if "underlying" in positions.columns:
+            symbols = positions["underlying"]
+        elif "symbol" in positions.columns:
+            symbols = positions["symbol"]
+        else:
             return positions.iloc[0:0]
         mask = []
         for symbol in symbols:

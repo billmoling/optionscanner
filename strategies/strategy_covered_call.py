@@ -7,7 +7,7 @@ from typing import Any, Iterable, List
 import pandas as pd
 from loguru import logger
 
-from .base import BaseOptionStrategy, TradeSignal
+from .base import BaseOptionStrategy, SignalLeg, TradeSignal
 
 
 class CoveredCallStrategy(BaseOptionStrategy):
@@ -67,6 +67,14 @@ class CoveredCallStrategy(BaseOptionStrategy):
                             option_type="CALL",
                             direction="SHORT_CALL",
                             rationale=rationale,
+                            legs=(
+                                SignalLeg(
+                                    action="SELL",
+                                    option_type="CALL",
+                                    strike=float(best["strike"]),
+                                    expiry=expiry,
+                                ),
+                            ),
                         )
                     )
                 )

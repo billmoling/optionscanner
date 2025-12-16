@@ -95,7 +95,7 @@ slack:
   title: "Daily Option Scanner Signals"
   max_rows: 30
 automation:
-  enabled: true
+  enabled: false
   trade_execution:
     enabled: true
     default_quantity: 1
@@ -104,7 +104,7 @@ automation:
     max_orders: 5
     allow_market_fallback: true
   portfolio_execution:
-    enabled: true
+    enabled: false
     max_positions: 5
     use_market_orders: false
     limit_padding_pct: 0.03

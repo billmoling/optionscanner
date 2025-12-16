@@ -38,6 +38,9 @@ async def run_once(
     stock_history_kwargs: Optional[Dict[str, Any]] = None,
     trade_executor: Optional[TradeExecutor] = None,
 ) -> None:
+    loop = asyncio.get_running_loop()
+    if trade_executor:
+        trade_executor.set_event_loop(loop)
     symbol_list = list(symbols)
     underlying_context: Dict[str, Dict[str, Any]] = {}
     market_state_results: Dict[str, MarketStateResult] = {}
