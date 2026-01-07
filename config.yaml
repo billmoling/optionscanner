@@ -12,6 +12,7 @@ tickers:
   - SPY
   - QQQ
   - IWM
+  - VIX
 log_dir: "./logs"
 data_dir: "./data"
 enable_gemini: true
@@ -79,6 +80,13 @@ strategies:
       short_min_theta_abs: 0.02
       min_return_on_capital: 0.05
       max_trade_ideas: 5
+  VixFearFadeStrategy:
+    params:
+      vix_symbol: "VIX"
+      target_symbol: "QQQ"
+      vix_threshold: 35.0
+      confirmation_sessions: 5
+      enabled: false
 schedule:
   times:
     - "06:30"
