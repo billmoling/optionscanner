@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import abc
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Iterable, List, Optional
+from typing import Any, Iterable, List, Optional, Tuple
 
 from loguru import logger
 
@@ -17,6 +18,17 @@ except ImportError as exc:  # pragma: no cover - handled at runtime
 
 
 @dataclass(slots=True)
+class SignalLeg:
+    """Represents an individual option leg within a multi-leg idea."""
+
+    action: str  # BUY / SELL
+    option_type: str
+    strike: float
+    expiry: datetime
+    quantity: int = 1
+
+
+@dataclass(slots=True)
 class TradeSignal:
     """Represents a trade signal emitted by a strategy."""
 
@@ -26,6 +38,7 @@ class TradeSignal:
     option_type: str
     direction: str
     rationale: str
+    legs: Tuple[SignalLeg, ...] = ()
 
 
 class BaseOptionStrategy(Strategy, abc.ABC):
@@ -47,16 +60,53 @@ class BaseOptionStrategy(Strategy, abc.ABC):
         """Utility for logging and returning signals."""
 
         logger.info(
-            "Signal emitted | strategy={strategy} symbol={symbol} strike={strike} expiry={expiry} type={opt_type} direction={direction} rationale={rationale}",
+            "Signal emitted | strategy={strategy} symbol={symbol} strike={strike} expiry={expiry} type={opt_type} direction={direction} legs={legs} rationale={rationale}",
             strategy=self.name,
             symbol=signal.symbol,
             strike=signal.strike,
             expiry=signal.expiry.isoformat(),
             opt_type=signal.option_type,
             direction=signal.direction,
+            legs=len(signal.legs) or 0,
             rationale=signal.rationale,
         )
         return signal
 
+    @staticmethod
+    def _snapshot_value(snapshot: Any, key: str, default: Any = None) -> Any:
+        if snapshot is None:
+            return default
+        if isinstance(snapshot, Mapping):
+            return snapshot.get(key, default)
+        return getattr(snapshot, key, default)
 
-__all__ = ["BaseOptionStrategy", "TradeSignal"]
+    @staticmethod
+    def _snapshot_options(snapshot: Any) -> List[Any]:
+        options = BaseOptionStrategy._snapshot_value(snapshot, "options")
+        if not options:
+            return []
+        if isinstance(options, list):
+            return options
+        try:
+            return list(options)
+        except TypeError:
+            return []
+
+    def _resolve_underlying_price(self, snapshot: Any, chain: Any) -> Optional[float]:
+        price = self._snapshot_value(snapshot, "underlying_price")
+        if price is None and chain is not None:
+            try:
+                if "underlying_price" in chain and len(chain):
+                    series = chain["underlying_price"]
+                    price = series.iloc[0] if hasattr(series, "iloc") else series[0]
+            except Exception:
+                price = None
+        if price is None:
+            return None
+        try:
+            return float(price)
+        except (TypeError, ValueError):
+            return None
+
+
+__all__ = ["BaseOptionStrategy", "SignalLeg", "TradeSignal"]

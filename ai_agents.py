@@ -1,284 +1,152 @@
-"""Utility agents for explaining and validating trade signals."""
+"""Utility agents for batching and validating trade signals."""
 from __future__ import annotations
 
-import os
+import json
+import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from statistics import mean
-from textwrap import dedent
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Optional
 
 from loguru import logger
-import yaml
 
-from strategies.base import TradeSignal
+from gemini_client import GeminiClient, GeminiClientError
 from option_data import OptionChainSnapshot
-
-try:  # pragma: no cover - optional dependency resolved at runtime
-    import google.generativeai as genai
-except ImportError:  # pragma: no cover - handled gracefully in GeminiClient
-    genai = None  # type: ignore[assignment]
-
-
-class GeminiClientError(RuntimeError):
-    """Raised when the Gemini client cannot fulfill a request."""
+from strategies.base import TradeSignal
 
 
 @dataclass(slots=True)
-class GeminiClient:
-    """Lightweight wrapper for Google Gemini text generation."""
+class GeminiSelection:
+    """Represents a Gemini-chosen finalist from a batch review."""
 
-    model_name: str = "gemini-2.5-flash"
-    api_key_env_vars: Sequence[str] = ("GOOGLE_API_KEY", "GEMINI_API_KEY")
-    config_path_env_var: str = "GEMINI_CONFIG_PATH"
-    config_file_candidates: Sequence[str] = (
-        "config/secrets.yaml",
-        "secrets.yaml",
-        ".secrets.yaml",
-    )
-    temperature: float = 0.6
-    top_p: float = 0.9
-    max_output_tokens: int = 512
-    _model: Optional["genai.GenerativeModel"] = field(init=False, default=None)
-    _configured: bool = field(init=False, default=False)
-
-    def _ensure_model(self) -> "genai.GenerativeModel":
-        if self._configured and self._model is not None:
-            return self._model
-        if genai is None:
-            raise GeminiClientError(
-                "google-generativeai is not installed; install it or disable Gemini usage."
-            )
-        api_key = self._resolve_api_key()
-        if not api_key:
-            raise GeminiClientError(
-                "Gemini API key not found. Set one of: " + ", ".join(self.api_key_env_vars)
-            )
-        try:
-            genai.configure(api_key=api_key)
-            generation_config = genai.GenerationConfig(
-                temperature=self.temperature,
-                top_p=self.top_p,
-                max_output_tokens=self.max_output_tokens,
-            )
-            self._model = genai.GenerativeModel(
-                self.model_name,
-                generation_config=generation_config,
-            )
-            self._configured = True
-            return self._model
-        except Exception as exc:  # pragma: no cover - network/runtime failure
-            raise GeminiClientError(f"Failed to initialise Gemini client: {exc}") from exc
-
-    def _resolve_api_key(self) -> Optional[str]:
-        for env_var in self.api_key_env_vars:
-            api_key = os.getenv(env_var)
-            if api_key:
-                return api_key
-        config_api_key = self._resolve_api_key_from_config()
-        if config_api_key:
-            return config_api_key
-        return None
-
-    def _resolve_api_key_from_config(self) -> Optional[str]:
-        explicit_path = os.getenv(self.config_path_env_var)
-        candidate_paths: List[Path] = []
-        if explicit_path:
-            candidate_paths.append(Path(explicit_path).expanduser())
-        candidate_paths.extend(Path(path) for path in self.config_file_candidates)
-
-        for path in candidate_paths:
-            if not path.exists():
-                continue
-            try:
-                with path.open("r", encoding="utf-8") as fh:
-                    data = yaml.safe_load(fh) or {}
-            except Exception as exc:  # pragma: no cover - defensive parsing
-                logger.warning(
-                    "Unable to read Gemini secret file | path={path} reason={error}",
-                    path=str(path),
-                    error=exc,
-                )
-                continue
-            api_key = self._extract_api_key(data)
-            if api_key:
-                return api_key
-        return None
-
-    def _extract_api_key(self, data: object) -> Optional[str]:
-        if not isinstance(data, dict):
-            return None
-
-        key_paths = (
-            ("google_api_key",),
-            ("gemini_api_key",),
-            ("google", "api_key"),
-            ("gemini", "api_key"),
-        )
-
-        for path in key_paths:
-            value: object = data
-            for part in path:
-                if isinstance(value, dict) and part in value:
-                    value = value[part]
-                else:
-                    break
-            else:
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
-        return None
-
-    def generate(self, *, system_prompt: str, user_prompt: str) -> str:
-        model = self._ensure_model()
-        prompt = dedent(
-            f"""
-            {system_prompt.strip()}
-
-            {user_prompt.strip()}
-            """
-        ).strip()
-        try:
-            response = model.generate_content([{"role": "user", "parts": [{"text": prompt}]}])
-        except Exception as exc:  # pragma: no cover - API/runtime failure
-            raise GeminiClientError(f"Gemini generation failed: {exc}") from exc
-
-        text = getattr(response, "text", None)
-        if text:
-            return text.strip()
-        try:
-            candidates = getattr(response, "candidates", None) or []
-            parts = candidates[0].content.parts if candidates else []
-            combined = " ".join(part.text for part in parts if getattr(part, "text", ""))
-        except Exception as exc:  # pragma: no cover - defensive parsing
-            raise GeminiClientError(f"Unable to parse Gemini response: {exc}") from exc
-        if not combined.strip():
-            raise GeminiClientError("Gemini response did not contain text content")
-        return combined.strip()
+    id: int
+    score: Optional[float] = None
+    reason: Optional[str] = None
 
 
 @dataclass(slots=True)
-class SignalExplainAgent:
-    """Generate a natural language explanation for a trade signal."""
+class BatchSelectionResult:
+    """Outcome of a batch Gemini selection call."""
+
+    selections: List[GeminiSelection]
+    prompt: Optional[str]
+    response: Optional[str]
+
+
+@dataclass(slots=True)
+class SignalBatchSelector:
+    """Rank a batch of signals at once and select the top candidates."""
 
     client: Optional[GeminiClient] = None
-    bullish_templates: Sequence[str] = (
-        "The setup anticipates strength in {symbol}, so the {direction} {option_type} looks to capture upside once the price clears the {strike:.2f} strike.",
-        "A supportive backdrop suggests momentum could build above {strike:.2f}, making a {direction.lower()} on the {option_type.lower()} attractive for upside participation.",
-    )
-    bearish_templates: Sequence[str] = (
-        "The thesis expects weakness in {symbol}; the {direction} {option_type} aims to profit if price slips beneath {strike:.2f}.",
-        "Downside pressure is the primary risk in focus, so {direction.lower()} the {option_type.lower()} offers protection should price drop through {strike:.2f}.",
-    )
+    enable_gemini: bool = True
+    top_k: int = 5
 
-    def __post_init__(self) -> None:
+    def select(self, signals: List[tuple[str, TradeSignal]]) -> BatchSelectionResult:
+        if not self.enable_gemini or not signals:
+            return BatchSelectionResult([], None, None)
         if self.client is None:
             self.client = GeminiClient()
 
-    def explain(
-        self,
-        signal: TradeSignal,
-        snapshot: Optional["OptionChainSnapshot"],
-    ) -> str:
-        """Return a concise explanation of what the signal attempts to capture."""
-
-        snapshot_summary = self._snapshot_summary(snapshot)
         system_prompt = (
-            "You are an expert options strategist. Explain to a trader why an options signal "
-            "was generated, covering upside, downside, and how market context supports the idea."
+            "You are an options desk lead. Review a list of candidate option trades and pick the strongest ideas. "
+            f"Select at most {self.top_k} finalists that balance risk/reward and liquidity. "
+            "Return ONLY JSON with shape: "
+            '{"finalists":[{"id":<number>,"score":<0-10 optional>,"reason":"concise why this idea wins"}],'
+            '"summary":"one-sentence portfolio note"}. '
+            "Use only IDs that appear in the list."
         )
-        user_prompt = (
-            "Provide a focused explanation (3-5 sentences) of the following trade signal. "
-            "Highlight what happens if price rises or falls, and reference relevant option market context.\n"
-            f"Signal:\n"
-            f"  Symbol: {signal.symbol}\n"
-            f"  Direction: {signal.direction}\n"
-            f"  Option type: {signal.option_type}\n"
-            f"  Strike: {signal.strike:.2f}\n"
-            f"  Expiry: {signal.expiry.isoformat()}\n"
-            f"  Rationale: {signal.rationale or 'N/A'}\n"
-            f"Market snapshot summary:\n{snapshot_summary or 'No recent market data provided.'}"
-        )
+        user_prompt = self._build_user_prompt(signals)
         try:
-            explanation = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
-            logger.debug(
-                "Explain agent (Gemini) output | symbol={symbol} text={text}",
-                symbol=signal.symbol,
-                text=explanation,
-            )
-            return explanation
+            response = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
         except GeminiClientError as exc:
-            logger.warning(
-                "Falling back to template explanation | symbol={symbol} reason={error}",
-                symbol=signal.symbol,
-                error=exc,
-            )
-            fallback = self._fallback_explanation(signal, snapshot)
-            logger.debug(
-                "Explain agent (fallback) output | symbol={symbol} text={text}",
-                symbol=signal.symbol,
-                text=fallback,
-            )
-            return fallback
+            logger.warning("Batch Gemini selection failed | reason={error}", error=exc)
+            return BatchSelectionResult([], user_prompt, None)
 
-    def _snapshot_summary(self, snapshot: Optional["OptionChainSnapshot"]) -> str:
-        if snapshot is None or not snapshot.options:
-            return ""
+        selections = self._parse_response(response)
+        if not selections:
+            logger.warning("Gemini selection returned no finalists; response may be unstructured")
+        return BatchSelectionResult(selections, user_prompt, response)
+
+    def _build_user_prompt(self, signals: List[tuple[str, TradeSignal]]) -> str:
         lines = [
-            f"Underlying price: {snapshot.underlying_price:.2f}",
-            f"Snapshot timestamp (UTC): {snapshot.timestamp.isoformat()}",
+            "Evaluate these option trade signals. Consider directional edge, risk, and simplicity.",
+            "Pick the top ideas only; skip low-quality trades.",
+            "",
+            "Signals:",
         ]
-        sorted_options = sorted(
-            snapshot.options,
-            key=lambda option: abs(float(option.get("strike", 0.0)) - snapshot.underlying_price),
-        )[:5]
-        for option in sorted_options:
-            strike = float(option.get("strike", 0.0))
-            option_type = option.get("option_type", "?")
-            mark = float(option.get("mark", 0.0) or 0.0)
-            delta = float(option.get("delta", 0.0) or 0.0)
+        for idx, (strategy, signal) in enumerate(signals, start=1):
+            expiry_text = signal.expiry.date().isoformat() if hasattr(signal.expiry, "date") else str(signal.expiry)
+            leg_summary = self._format_leg_summary(signal)
             lines.append(
-                f"  {option_type} strike {strike:.2f} | mark {mark:.2f} | delta {delta:.2f}"
+                f"{idx}. Strategy: {strategy} | Symbol: {signal.symbol} | Direction: {signal.direction} | "
+                f"Option: {signal.option_type} {signal.strike:.2f} exp {expiry_text}"
+                + (f" | Legs: {leg_summary}" if leg_summary else "")
+                + f" | Rationale: {signal.rationale}"
             )
+        lines.append("")
+        lines.append("Return JSON only.")
         return "\n".join(lines)
 
-    def _fallback_explanation(
-        self,
-        signal: TradeSignal,
-        snapshot: Optional["OptionChainSnapshot"],
-    ) -> str:
-        template = self._choose_template(signal.direction)
-        base = template.format(
-            symbol=signal.symbol,
-            direction=signal.direction,
-            option_type=signal.option_type,
-            strike=signal.strike,
-        )
-        rationale_note = f" Rationale: {signal.rationale}." if signal.rationale else ""
-        market_note = self._market_scenarios(signal, snapshot)
-        return f"{base}{market_note}{rationale_note}".strip()
+    def _parse_response(self, response: str) -> List[GeminiSelection]:
+        if not response:
+            return []
+        candidates = [response]
+        if "```" in response:
+            candidates.extend(part for part in response.split("```") if part and "{" in part)
 
-    def _choose_template(self, direction: str) -> str:
-        direction_upper = (direction or "").upper()
-        if any(keyword in direction_upper for keyword in ("CALL", "BULL", "LONG")):
-            return self.bullish_templates[0]
-        if any(keyword in direction_upper for keyword in ("PUT", "BEAR", "SHORT")):
-            return self.bearish_templates[0]
-        return "The strategy produced a {direction} idea on {symbol} around the {strike:.2f} level."  # fallback
+        for candidate in candidates:
+            try:
+                cleaned = candidate.strip()
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[len("json") :].strip()
+                start = cleaned.find("{")
+                end = cleaned.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    cleaned = cleaned[start : end + 1]
+                data = json.loads(cleaned)
+                selections = self._extract_selections(data)
+                if selections:
+                    return selections
+            except json.JSONDecodeError:
+                continue
+        return []
 
-    def _market_scenarios(
-        self,
-        signal: TradeSignal,
-        snapshot: Optional["OptionChainSnapshot"],
-    ) -> str:
-        if snapshot is None or not snapshot.options:
+    def _extract_selections(self, data: object) -> List[GeminiSelection]:
+        if not isinstance(data, dict):
+            return []
+        finalists = data.get("finalists")
+        if not isinstance(finalists, list):
+            return []
+        selections: List[GeminiSelection] = []
+        for item in finalists:
+            if not isinstance(item, dict):
+                continue
+            idx_raw = item.get("id")
+            try:
+                idx = int(idx_raw)
+            except (TypeError, ValueError):
+                continue
+            score_raw = item.get("score")
+            try:
+                score = float(score_raw) if score_raw is not None else None
+            except (TypeError, ValueError):
+                score = None
+            reason = item.get("reason")
+            if isinstance(reason, str):
+                reason = reason.strip()
+            selections.append(GeminiSelection(id=idx, score=score, reason=reason or None))
+        return selections
+
+    @staticmethod
+    def _format_leg_summary(signal: TradeSignal) -> str:
+        if not getattr(signal, "legs", None):
             return ""
-        price = snapshot.underlying_price
-        upside = price * 1.02
-        downside = price * 0.98
-        return (
-            f" If price rallies toward {upside:.2f}, the position should benefit as it moves deeper in-the-money."
-            f" If price retreats toward {downside:.2f}, reassess the thesis because the option could lose premium."
-        )
+        parts = []
+        for leg in signal.legs:
+            parts.append(
+                f"{getattr(leg, 'action', '?')}/{getattr(leg, 'option_type', '?')} "
+                f"{getattr(leg, 'strike', '?')}"
+            )
+        return " / ".join(parts)
 
 
 @dataclass(slots=True)
@@ -287,15 +155,18 @@ class SignalValidationAgent:
 
     lookback_limit: int = 20
     client: Optional[GeminiClient] = None
+    enable_gemini: bool = True
+    cooldown_seconds: int = 60
+    _rate_limited_until: float = field(init=False, default=0.0)
 
     def __post_init__(self) -> None:
-        if self.client is None:
+        if self.enable_gemini and self.client is None:
             self.client = GeminiClient()
 
     def review(
         self,
         signal: TradeSignal,
-        snapshot: Optional["OptionChainSnapshot"],
+        snapshot: Optional[OptionChainSnapshot],
         peer_signals: Iterable[TradeSignal],
     ) -> str:
         peer_list = list(peer_signals)
@@ -325,27 +196,39 @@ class SignalValidationAgent:
             f"Market snapshot summary:\n{self._snapshot_overview(snapshot) or 'No snapshot data supplied.'}\n"
             f"Peer signal summary:\n{peer_summary or 'No other signals for this batch.'}"
         )
+        if not self.enable_gemini:
+            logger.info(
+                "Gemini validation disabled via configuration; using heuristic | symbol={symbol}",
+                symbol=signal.symbol,
+            )
+            return self._fallback_review(signal, trend, alignment, peer_view)
+        if time.time() < self._rate_limited_until:
+            logger.info(
+                "Gemini validation temporarily disabled due to prior rate limit; using heuristic | symbol={symbol}",
+                symbol=signal.symbol,
+            )
+            return self._fallback_review(signal, trend, alignment, peer_view)
         try:
             review_text = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
-            logger.debug(
-                "Validation agent (Gemini) output | symbol={symbol} text={text}",
-                symbol=signal.symbol,
-                text=review_text,
-            )
-            return review_text
         except GeminiClientError as exc:
+            self._handle_rate_limit(exc)
             logger.warning(
                 "Falling back to heuristic validation | symbol={symbol} reason={error}",
                 symbol=signal.symbol,
                 error=exc,
             )
-            fallback = self._fallback_review(signal, trend, alignment, peer_view)
-            logger.debug(
-                "Validation agent (fallback) output | symbol={symbol} text={text}",
-                symbol=signal.symbol,
-                text=fallback,
-            )
-            return fallback
+            return self._fallback_review(signal, trend, alignment, peer_view)
+        logger.debug(
+            "Validation agent (Gemini) output | symbol={symbol} text={text}",
+            symbol=signal.symbol,
+            text=review_text,
+        )
+        return review_text
+
+    def _handle_rate_limit(self, exc: GeminiClientError) -> None:
+        message = str(exc).lower()
+        if "429" in message or "resource exhausted" in message or "rate" in message:
+            self._rate_limited_until = time.time() + max(self.cooldown_seconds, 1)
 
     def _fallback_review(
         self,
@@ -367,7 +250,7 @@ class SignalValidationAgent:
             )
         return " ".join(commentary_parts)
 
-    def _snapshot_overview(self, snapshot: Optional["OptionChainSnapshot"]) -> str:
+    def _snapshot_overview(self, snapshot: Optional[OptionChainSnapshot]) -> str:
         if snapshot is None or not snapshot.options:
             return ""
         option_count = len(snapshot.options)
@@ -384,17 +267,17 @@ class SignalValidationAgent:
         same_symbol = [s for s in peer_signals if s.symbol == target.symbol]
         if not same_symbol:
             return f"Total signals evaluated: {total}; none share the symbol {target.symbol}."
-        directional_breakdown = {}
-        for signal in same_symbol:
-            directional_breakdown.setdefault(signal.direction, 0)
-            directional_breakdown[signal.direction] += 1
+        directional_breakdown: dict[str, int] = {}
+        for sig in same_symbol:
+            directional_breakdown.setdefault(sig.direction, 0)
+            directional_breakdown[sig.direction] += 1
         breakdown_str = ", ".join(f"{direction}: {count}" for direction, count in directional_breakdown.items())
         return (
             f"Total signals evaluated: {total}; matching symbol signals: {len(same_symbol)}.\n"
             f"Directional breakdown: {breakdown_str}"
         )
 
-    def _infer_trend(self, snapshot: Optional["OptionChainSnapshot"]) -> Optional[str]:
+    def _infer_trend(self, snapshot: Optional[OptionChainSnapshot]) -> Optional[str]:
         if snapshot is None or not snapshot.options:
             return None
 
@@ -449,4 +332,11 @@ class SignalValidationAgent:
         return "Some strategies agree while others differ; weigh conviction before acting."
 
 
-__all__ = ["SignalExplainAgent", "SignalValidationAgent", "GeminiClient", "GeminiClientError"]
+__all__ = [
+    "SignalValidationAgent",
+    "SignalBatchSelector",
+    "GeminiSelection",
+    "BatchSelectionResult",
+    "GeminiClient",
+    "GeminiClientError",
+]

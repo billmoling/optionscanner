@@ -98,6 +98,12 @@ class SlackNotifier:
         for label, value in summary_fields.items():
             if value not in (None, ""):
                 lines.append(f"{label}: {value}")
+        legs = row.get("legs")
+        leg_lines = self._format_legs(legs)
+        if leg_lines:
+            lines.append("")
+            lines.append("Legs:")
+            lines.extend(leg_lines)
         explanation = row.get("explanation")
         if explanation:
             lines.append("")
@@ -126,7 +132,7 @@ class SlackNotifier:
 
     def _resolve_webhook_url(self, config: Dict[str, object]) -> str:
         configured = str(config.get("webhook_url", "") or "").strip()
-        if configured:
+        if configured and not self._is_placeholder_webhook(configured):
             return configured
 
         env_value = os.getenv("SLACK_WEBHOOK_URL", "").strip()
@@ -138,6 +144,10 @@ class SlackNotifier:
             return secret_value
 
         return ""
+
+    def _is_placeholder_webhook(self, url: str) -> bool:
+        """Detect sample/placeholder webhook strings so we can fall back to real secrets."""
+        return any(token in url for token in ("XXX", "YYY", "ZZ", "ZZZ"))
 
     def _load_webhook_from_secrets(self) -> str:
         candidates: Iterable[Path] = (
@@ -170,7 +180,9 @@ class SlackNotifier:
         # Common layouts: top-level key or nested under "slack"/"notifications"
         direct = data.get("slack_webhook_url")
         if isinstance(direct, str) and direct.strip():
-            return direct.strip()
+            candidate = direct.strip()
+            if not self._is_placeholder_webhook(candidate):
+                return candidate
 
         for key in ("slack", "notifications"):
             section = data.get(key)
@@ -178,6 +190,38 @@ class SlackNotifier:
                 continue
             value = section.get("webhook_url") or section.get("slack_webhook_url")
             if isinstance(value, str) and value.strip():
-                return value.strip()
+                candidate = value.strip()
+                if not self._is_placeholder_webhook(candidate):
+                    return candidate
 
         return ""
+
+    def _format_legs(self, raw: object) -> List[str]:
+        """Render a human-readable leg breakdown from DataFrame/JSON payloads."""
+        legs: List[Dict[str, object]] = []
+        if isinstance(raw, (list, tuple)):
+            legs = [
+                leg for leg in raw if isinstance(leg, dict)
+            ]
+        elif isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    legs = [leg for leg in parsed if isinstance(leg, dict)]
+            except Exception:
+                legs = []
+        if not legs:
+            return []
+        lines: List[str] = []
+        for leg in legs:
+            action = str(leg.get("action", "")).upper()
+            option_type = str(leg.get("option_type", "")).upper()
+            strike = leg.get("strike")
+            expiry = leg.get("expiry")
+            parts = [action or "?", option_type or "?"]
+            if strike not in (None, ""):
+                parts.append(f"{strike}")
+            if expiry not in (None, ""):
+                parts.append(f"exp {expiry}")
+            lines.append(" ".join(parts))
+        return lines

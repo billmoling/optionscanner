@@ -2,17 +2,24 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import json
+from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 from loguru import logger
 from zoneinfo import ZoneInfo
 
-from ai_agents import SignalExplainAgent, SignalValidationAgent
+from ai_agents import BatchSelectionResult, SignalBatchSelector
+from execution import TradeExecutor
 from notifications import SlackNotifier
 from option_data import BaseDataFetcher, OptionChainSnapshot
+from position_cache import ExitRecommendation, PositionCache
+from stock_data import StockDataFetcher
+from technical_indicators import TechnicalIndicatorProcessor
+from market_state import DictMarketStateProvider, MarketStateClassifier, MarketStateResult
 from scheduling import compute_next_run, parse_schedule_times
 from strategies.base import BaseOptionStrategy, TradeSignal
 
@@ -23,50 +30,240 @@ async def run_once(
     symbols: Iterable[str],
     results_dir: Path,
     *,
-    explain_agent: Optional[SignalExplainAgent] = None,
-    validation_agent: Optional[SignalValidationAgent] = None,
+    selection_agent: Optional[SignalBatchSelector] = None,
     slack_notifier: Optional[SlackNotifier] = None,
+    enable_gemini: bool = True,
+    stock_fetcher: Optional[StockDataFetcher] = None,
+    indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
+    stock_history_kwargs: Optional[Dict[str, Any]] = None,
+    trade_executor: Optional[TradeExecutor] = None,
 ) -> None:
-    snapshots = await fetcher.fetch_all(symbols)
+    loop = asyncio.get_running_loop()
+    if trade_executor:
+        trade_executor.set_event_loop(loop)
+    symbol_list = list(symbols)
+    underlying_context: Dict[str, Dict[str, Any]] = {}
+    market_state_results: Dict[str, MarketStateResult] = {}
+    if stock_fetcher is not None:
+        underlying_context, market_state_results = await _fetch_underlying_context(
+            stock_fetcher,
+            symbol_list,
+            indicator_processor=indicator_processor,
+            history_kwargs=stock_history_kwargs or {},
+        )
+    snapshots = await fetcher.fetch_all(symbol_list)
+    if underlying_context:
+        for snapshot in snapshots:
+            context = underlying_context.get(snapshot.symbol.upper())
+            if context:
+                if snapshot.context is None:
+                    snapshot.context = {}
+                snapshot.context.update(context)
+                state_result = market_state_results.get(snapshot.symbol.upper())
+                if state_result:
+                    snapshot.context.setdefault("market_state", state_result.state.value)
+                    snapshot.context.setdefault("market_state_as_of", state_result.as_of.isoformat())
+    snapshot_by_symbol = {snapshot.symbol.upper(): snapshot for snapshot in snapshots}
+    cache = PositionCache(results_dir / "position_cache.json")
+    state_provider = None
+    if market_state_results:
+        state_provider = DictMarketStateProvider(
+            {symbol: result.state for symbol, result in market_state_results.items()}
+        )
+        logger.info(
+            "Market state provider initialized | symbols={symbols}",
+            symbols=",".join(sorted(market_state_results.keys())),
+        )
+        for strategy in strategies:
+            if hasattr(strategy, "market_state_provider"):
+                strategy.market_state_provider = state_provider
     aggregated_signals: List[Tuple[str, TradeSignal]] = []
     for strategy in strategies:
         try:
             signals = strategy.on_data(snapshots)
             for signal in signals:
                 aggregated_signals.append((strategy.name, signal))
+                cache.record_signal(strategy.name, signal, snapshot_by_symbol.get((signal.symbol or "").upper()))
         except Exception:
             logger.exception("Strategy {name} failed", name=strategy.name)
+    exit_recommendations = cache.evaluate_exits(snapshot_by_symbol)
+    cache.save()
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if exit_recommendations:
+        _export_exit_recommendations(results_dir, exit_recommendations, timestamp)
     if not aggregated_signals:
         logger.info("No trade signals generated in this iteration")
         return
     results_dir.mkdir(parents=True, exist_ok=True)
-    explain_agent = explain_agent or SignalExplainAgent()
-    validation_agent = validation_agent or SignalValidationAgent()
-    snapshot_by_symbol = {snapshot.symbol: snapshot for snapshot in snapshots}
+    selection_agent = selection_agent or (SignalBatchSelector(enable_gemini=enable_gemini) if enable_gemini else None)
+    selection_result: BatchSelectionResult = (
+        selection_agent.select(aggregated_signals) if selection_agent else BatchSelectionResult([], None, None)
+    )
+    finalist_map = {selection.id: selection for selection in selection_result.selections}
+
     rows: List[Dict[str, Any]] = []
-    signals_only = [signal for _strategy_name, signal in aggregated_signals]
-    for strategy_name, signal in aggregated_signals:
-        snapshot = snapshot_by_symbol.get(signal.symbol)
-        explanation = explain_agent.explain(signal, snapshot)
-        validation = validation_agent.review(signal, snapshot, signals_only)
-        row = signal.__dict__.copy()
+    for idx, (strategy_name, signal) in enumerate(aggregated_signals, start=1):
+        row = asdict(signal)
         row.update(
             {
-                "explanation": explanation,
-                "validation": validation,
                 "strategy": strategy_name,
+                "gemini_id": idx,
             }
         )
+        selection = finalist_map.get(idx)
+        row["gemini_selected"] = selection is not None
+        row["gemini_score"] = selection.score if selection else None
+        row["gemini_reason"] = selection.reason if selection else None
+        if selection and selection.reason:
+            row["explanation"] = selection.reason
         rows.append(row)
     df = pd.DataFrame(rows)
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    preferred_order = [
+        "symbol",
+        "expiry",
+        "strike",
+        "option_type",
+        "strategy",
+        "direction",
+        "rationale",
+        "gemini_selected",
+        "gemini_score",
+        "gemini_reason",
+        "explanation",
+    ]
+    ordered_columns = [col for col in preferred_order if col in df.columns]
+    remaining_columns = [col for col in df.columns if col not in ordered_columns]
+    df = df[ordered_columns + remaining_columns]
     file_path = results_dir / f"signals_{timestamp}.csv"
     df.to_csv(file_path, index=False)
     logger.info("Saved {count} signals to {path}", count=len(df), path=str(file_path))
 
+    if selection_agent and selection_result.response:
+        selection_path = results_dir / f"gemini_signal_selection_{timestamp}.json"
+        try:
+            payload = {
+                "as_of": timestamp,
+                "prompt": selection_result.prompt,
+                "response": selection_result.response,
+                "finalists": [
+                    {"id": sel.id, "score": sel.score, "reason": sel.reason} for sel in selection_result.selections
+                ],
+                "candidate_count": len(aggregated_signals),
+            }
+            selection_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            logger.info("Saved Gemini selection output to {path}", path=str(selection_path))
+        except Exception:
+            logger.warning("Failed to persist Gemini selection output", exc_info=True)
+
+    finalists_df = df[df["gemini_selected"] == True] if "gemini_selected" in df.columns else df.iloc[0:0]
+    finalist_payload: List[Tuple[str, TradeSignal, Optional[float], Optional[str]]] = []
+    for idx, (strategy_name, signal) in enumerate(aggregated_signals, start=1):
+        selection = finalist_map.get(idx)
+        if selection:
+            finalist_payload.append((strategy_name, signal, selection.score, selection.reason))
+
     if slack_notifier:
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, slack_notifier.send_signals, df, file_path)
+        if finalists_df.empty:
+            logger.info("No Gemini-selected finalists to send to Slack")
+        else:
+            await loop.run_in_executor(None, slack_notifier.send_signals, finalists_df, file_path)
+    if trade_executor and finalist_payload:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, trade_executor.execute_finalists, finalist_payload, snapshot_by_symbol
+        )
+
+
+async def _fetch_underlying_context(
+    stock_fetcher: StockDataFetcher,
+    symbols: Sequence[str],
+    *,
+    indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
+    history_kwargs: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, MarketStateResult]]:
+    history_kwargs = history_kwargs or {}
+    try:
+        histories = await stock_fetcher.fetch_history_many(symbols, **history_kwargs)
+    except Exception:
+        logger.exception("Failed to download underlying stock history")
+        return {}, {}
+
+    processor = indicator_processor or TechnicalIndicatorProcessor()
+    processor.ensure_default_moving_averages()
+    classifier = MarketStateClassifier()
+    context: Dict[str, Dict[str, Any]] = {}
+    state_results: Dict[str, MarketStateResult] = {}
+
+    for symbol, history in histories.items():
+        if history is None or history.empty:
+            continue
+        try:
+            enriched = processor.process(history)
+        except Exception:
+            logger.exception("Failed to compute indicators for {symbol}", symbol=symbol)
+            continue
+        enriched = enriched.dropna(subset=["close"])
+        if enriched.empty:
+            continue
+        latest = enriched.iloc[-1]
+        metrics: Dict[str, Any] = {}
+        close_value = latest.get("close")
+        if pd.notna(close_value):
+            metrics["close"] = float(close_value)
+        for column in ("ma5", "ma10", "ma30", "ma50"):
+            value = latest.get(column)
+            if pd.notna(value):
+                metrics[column] = float(value)
+                if column == "ma30":
+                    metrics["moving_average_30"] = float(value)
+                elif column == "ma50":
+                    metrics["moving_average_50"] = float(value)
+        timestamp_value = latest.get("timestamp")
+        if pd.notna(timestamp_value):
+            timestamp = pd.to_datetime(timestamp_value, utc=True)
+            metrics["indicator_timestamp"] = timestamp.isoformat()
+
+        state_result = classifier.classify(enriched, symbol=symbol)
+        if state_result:
+            state_results[symbol.upper()] = state_result
+            metrics["market_state"] = state_result.state.value
+            metrics["market_state_as_of"] = state_result.as_of.isoformat()
+
+        if not metrics:
+            continue
+        context[symbol.upper()] = metrics
+    return context, state_results
+
+
+def _export_exit_recommendations(
+    results_dir: Path,
+    recommendations: List[ExitRecommendation],
+    timestamp: str,
+) -> None:
+    rows = [
+        {
+            "symbol": rec.symbol,
+            "strategy": rec.strategy,
+            "direction": rec.direction,
+            "strike": rec.strike,
+            "expiry": rec.expiry,
+            "reason": rec.reason,
+            "action": rec.action,
+        }
+        for rec in recommendations
+    ]
+    if not rows:
+        return
+    results_dir.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(rows)
+    path = results_dir / f"exits_{timestamp}.csv"
+    df.to_csv(path, index=False)
+    logger.info(
+        "Generated {count} exit recommendations | path={path}",
+        count=len(df),
+        path=str(path),
+    )
 
 
 async def run_scheduler(
@@ -76,6 +273,14 @@ async def run_scheduler(
     symbols: Sequence[str],
     results_dir: Path,
     slack_notifier: Optional[SlackNotifier],
+    *,
+    enable_gemini: bool = True,
+    run_signals: bool = True,
+    stock_fetcher: Optional[StockDataFetcher] = None,
+    indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
+    stock_history_kwargs: Optional[Dict[str, Any]] = None,
+    post_run: Optional[Callable[[], None]] = None,
+    trade_executor: Optional[TradeExecutor] = None,
 ) -> None:
     schedule_config = config.get("schedule", {})
     scheduled_times = parse_schedule_times(schedule_config)
@@ -93,8 +298,7 @@ async def run_scheduler(
         timezone=getattr(tz, "key", str(tz)),
     )
 
-    explain_agent = SignalExplainAgent()
-    validation_agent = SignalValidationAgent()
+    selection_agent = SignalBatchSelector(enable_gemini=enable_gemini) if enable_gemini else None
 
     while True:
         now = datetime.now(tz)
@@ -109,15 +313,25 @@ async def run_scheduler(
         start = datetime.now(tz)
         logger.info("Starting scheduled run at {start}", start=start.isoformat())
         try:
-            await run_once(
-                fetcher,
-                strategies,
-                symbols,
-                results_dir,
-                explain_agent=explain_agent,
-                validation_agent=validation_agent,
-                slack_notifier=slack_notifier,
-            )
+            if run_signals:
+                await run_once(
+                    fetcher,
+                    strategies,
+                    symbols,
+                    results_dir,
+                    selection_agent=selection_agent,
+                    slack_notifier=slack_notifier,
+                    enable_gemini=enable_gemini,
+                    stock_fetcher=stock_fetcher,
+                    indicator_processor=indicator_processor,
+                    stock_history_kwargs=stock_history_kwargs,
+                    trade_executor=trade_executor,
+                )
+            if post_run is not None:
+                try:
+                    post_run()
+                except Exception:
+                    logger.exception("Post-run callback failed")
         except Exception:
             logger.exception("Run failed")
         duration = (datetime.now(tz) - start).total_seconds()

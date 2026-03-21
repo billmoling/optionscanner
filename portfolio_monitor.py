@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
 import yaml
-from ib_insync import IB, Contract, Option
+from ib_async import IB, Contract, Option
 from loguru import logger
 
 from logging_utils import configure_logging
@@ -53,12 +53,14 @@ class PortfolioMonitor:
             delta = theta = 0.0
             days_to_expiry = None
             if isinstance(contract, Option):
-                ticker = await self._ib.reqMktDataAsync(contract, "", False, False)
+                ticker = await self._ib.reqMktDataAsync(contract, "", True, False)
                 if ticker.modelGreeks:
                     delta = ticker.modelGreeks.delta or 0.0
                     theta = ticker.modelGreeks.theta or 0.0
-                expiry_dt = datetime.strptime(contract.lastTradeDateOrContractMonth, "%Y%m%d")
-                days_to_expiry = (expiry_dt - datetime.utcnow()).days
+                expiry_dt = datetime.strptime(contract.lastTradeDateOrContractMonth, "%Y%m%d").replace(
+                    tzinfo=timezone.utc
+                )
+                days_to_expiry = (expiry_dt - datetime.now(timezone.utc)).days
             summaries.append(
                 {
                     "account": account,
@@ -79,7 +81,7 @@ class PortfolioMonitor:
     async def _ensure_market_price(self, contract: Contract) -> float:
         if isinstance(contract, Option):
             await self._ib.qualifyContractsAsync(contract)
-        ticker = await self._ib.reqMktDataAsync(contract, "", False, False)
+        ticker = await self._ib.reqMktDataAsync(contract, "", True, False)
         price = ticker.last or ticker.close or ticker.marketPrice()
         return float(price or 0.0)
 
@@ -116,8 +118,8 @@ class PortfolioMonitor:
             )
             pos["suggestion"] = suggestion
         df = pd.DataFrame(positions)
-        df["timestamp"] = datetime.utcnow()
-        csv_path = self.results_dir / f"portfolio_{datetime.utcnow().strftime('%Y%m%d')}.csv"
+        df["timestamp"] = datetime.now(timezone.utc)
+        csv_path = self.results_dir / f"portfolio_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
         df.to_csv(csv_path, index=False)
         logger.info("Portfolio summary saved to {path}", path=str(csv_path))
 

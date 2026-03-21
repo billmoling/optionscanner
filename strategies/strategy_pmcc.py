@@ -1,13 +1,13 @@
 """Poor Man's Covered Call (PMCC) strategy implementation."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Tuple
 
 import pandas as pd
 from loguru import logger
 
-from .base import BaseOptionStrategy, TradeSignal
+from .base import BaseOptionStrategy, SignalLeg, TradeSignal
 
 
 class PoorMansCoveredCallStrategy(BaseOptionStrategy):
@@ -25,7 +25,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
         short_otm_pct: float = 0.05,
         short_delta_range: Tuple[float, float] = (0.2, 0.45),
         short_min_theta_abs: float = 0.04,
-        min_return_on_capital: float = 0.12,
+        min_return_on_capital: float = 0.08, # minimum return on capital for PMCC trade ideas, it could be lower to 0.08-0.12
         max_trade_ideas: int = 5,
         **kwargs: Any,
     ) -> None:
@@ -44,7 +44,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
         self.max_trade_ideas = max_trade_ideas
 
     def on_data(self, data: Iterable[Any]) -> List[TradeSignal]:
-        now = pd.Timestamp(datetime.utcnow())
+        now = pd.Timestamp(datetime.now(timezone.utc))
         signals: List[TradeSignal] = []
 
         for snapshot in data:
@@ -52,10 +52,8 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
             if chain.empty:
                 continue
 
-            underlying_price = float(
-                snapshot.get("underlying_price", chain["underlying_price"].iloc[0])
-            )
-            if underlying_price <= 0:
+            underlying_price = self._resolve_underlying_price(snapshot, chain)
+            if underlying_price is None or underlying_price <= 0:
                 continue
 
             prepared = chain.copy()
@@ -63,7 +61,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
             if not required_cols.issubset(prepared.columns):
                 continue
             prepared["option_type"] = prepared["option_type"].str.upper()
-            prepared["expiry"] = pd.to_datetime(prepared["expiry"])
+            prepared["expiry"] = pd.to_datetime(prepared["expiry"], utc=True)
             prepared["days_to_expiry"] = (prepared["expiry"] - now).dt.days
             for greek in ("delta", "theta", "implied_volatility"):
                 if greek in prepared.columns:
@@ -258,6 +256,20 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
         leaps_expiry = pd.Timestamp(leaps["expiry"]).to_pydatetime()
         short_expiry = pd.Timestamp(short["expiry"]).to_pydatetime()
         symbol = candidate["symbol"]
+        legs = (
+            SignalLeg(
+                action="BUY",
+                option_type="CALL",
+                strike=float(leaps["strike"]),
+                expiry=leaps_expiry,
+            ),
+            SignalLeg(
+                action="SELL",
+                option_type="CALL",
+                strike=float(short["strike"]),
+                expiry=short_expiry,
+            ),
+        )
         rationale = (
             "PMCC idea | net_debit={net:.2f} credit={credit:.2f} ROI={roi:.2%} "
             "annualized={annual:.2%} underlying={underlying:.2f} "
@@ -284,6 +296,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
                     option_type="CALL",
                     direction="LONG_PMCC_LEAPS",
                     rationale=rationale,
+                    legs=legs,
                 )
             ),
             self.emit_signal(
@@ -294,6 +307,7 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
                     option_type="CALL",
                     direction="SHORT_PMCC_CALL",
                     rationale=rationale,
+                    legs=legs,
                 )
             ),
         ]
@@ -326,15 +340,17 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
         elif hasattr(snapshot, "to_pandas"):
             df = snapshot.to_pandas()
         else:
-            df = pd.DataFrame(snapshot.get("options", []))
+            df = pd.DataFrame(self._snapshot_options(snapshot))
         if df.empty:
             return df
         if "expiry" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["expiry"]):
-            df["expiry"] = pd.to_datetime(df["expiry"])
-        if "symbol" not in df.columns and "symbol" in snapshot:
-            df["symbol"] = snapshot["symbol"]
-        if "underlying_price" not in df.columns and "underlying_price" in snapshot:
-            df["underlying_price"] = snapshot["underlying_price"]
+            df["expiry"] = pd.to_datetime(df["expiry"], utc=True)
+        symbol = self._snapshot_value(snapshot, "symbol")
+        if "symbol" not in df.columns and symbol is not None:
+            df["symbol"] = symbol
+        underlying = self._snapshot_value(snapshot, "underlying_price")
+        if "underlying_price" not in df.columns and underlying is not None:
+            df["underlying_price"] = underlying
         return df
 
 

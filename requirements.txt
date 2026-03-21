@@ -1,7 +1,13 @@
+nautilus_trader
 pandas
-ib_insync
+ib_async
 loguru
+python-logging-loki
 asyncio
-schedule
 pyyaml
 google-generativeai
+python-dotenv
+numpy
+pytest
+pyarrow
+praw

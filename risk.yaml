@@ -1,0 +1,23 @@
+limits:
+  delta:
+    per_symbol: 500
+    total: 3000
+  gamma:
+    per_symbol: 50
+    total: 200
+  vega:
+    per_symbol: 10000
+    total: 30000
+  theta_min: 50
+  concentration:
+    max_symbol_pct_gross: 0.2
+  liquidity:
+    min_open_interest: 500
+    max_bid_ask_spread_pct: 2.0
+roll_rules:
+  pmcc:
+    take_profit_pct: 0.65
+    roll_up_if_short_delta_gt: 0.4
+    roll_out_days: 21
+  condor:
+    take_profit_pct: 0.6

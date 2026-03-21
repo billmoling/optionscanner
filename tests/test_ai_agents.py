@@ -1,9 +1,8 @@
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from ai_agents import (
     GeminiClientError,
-    SignalExplainAgent,
     SignalValidationAgent,
 )
 from option_data import OptionChainSnapshot
@@ -28,7 +27,7 @@ class DummyGeminiClient:
 def build_signal() -> TradeSignal:
     return TradeSignal(
         symbol="NVDA",
-        expiry=datetime.utcnow() + timedelta(days=30),
+        expiry=datetime.now(timezone.utc) + timedelta(days=30),
         strike=500.0,
         option_type="CALL",
         direction="LONG_CALL",
@@ -37,7 +36,7 @@ def build_signal() -> TradeSignal:
 
 
 def build_snapshot() -> OptionChainSnapshot:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expiry = now + timedelta(days=30)
     return OptionChainSnapshot(
         symbol="NVDA",
@@ -66,30 +65,6 @@ def build_snapshot() -> OptionChainSnapshot:
     )
 
 
-class SignalExplainAgentTests(unittest.TestCase):
-    def test_explain_agent_uses_gemini_when_available(self) -> None:
-        client = DummyGeminiClient(response="Gemini explanation")
-        agent = SignalExplainAgent(client=client)
-        signal = build_signal()
-        snapshot = build_snapshot()
-
-        explanation = agent.explain(signal, snapshot)
-
-        self.assertEqual(explanation, "Gemini explanation")
-        self.assertIsNotNone(client.last_user_prompt)
-        self.assertIn("Signal:", client.last_user_prompt or "")
-
-    def test_explain_agent_falls_back_when_gemini_fails(self) -> None:
-        client = DummyGeminiClient(should_raise=True)
-        agent = SignalExplainAgent(client=client)
-        signal = build_signal()
-
-        explanation = agent.explain(signal, None)
-
-        self.assertIn("setup anticipates strength", explanation or "")
-        self.assertIn(signal.symbol, explanation)
-
-
 class SignalValidationAgentTests(unittest.TestCase):
     def test_validation_agent_uses_gemini(self) -> None:
         client = DummyGeminiClient(response="Validation guidance")
@@ -110,6 +85,16 @@ class SignalValidationAgentTests(unittest.TestCase):
         review = agent.review(signal, None, [])
 
         self.assertTrue(review)
+
+    def test_validation_agent_can_disable_gemini(self) -> None:
+        client = DummyGeminiClient(response="should not be used")
+        agent = SignalValidationAgent(client=client, enable_gemini=False)
+        signal = build_signal()
+
+        review = agent.review(signal, None, [])
+
+        self.assertTrue(review)
+        self.assertIsNone(client.last_user_prompt)
 
 
 if __name__ == "__main__":
