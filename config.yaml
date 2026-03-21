@@ -31,7 +31,8 @@ reddit:
     - stocks
   lookback_posts: 100
   min_confidence: 0.5
-  min_upvotes: 50
+  # Note: RSS feeds don't provide upvote/comment counts reliably
+  # min_upvotes is now used as a secondary filter when data is available
   check_interval_minutes: 30
 stock_data:
   enabled: true

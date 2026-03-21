@@ -265,8 +265,10 @@ class WhaleDetector:
 
         # Calculate overall confidence
         # Factors: whale score, direction confidence, post engagement
-        engagement_factor = min(1.0, (post.score + post.num_comments) / 100)
-        confidence = (whale_score * 0.4 + direction_confidence * 0.4 + engagement_factor * 0.2)
+        # Note: RSS feeds don't provide score/num_comments reliably, so we use
+        # a simplified engagement factor based on content length as a proxy
+        engagement_factor = min(1.0, len(full_text) / 500)  # Longer posts often more detailed
+        confidence = (whale_score * 0.5 + direction_confidence * 0.35 + engagement_factor * 0.15)
 
         if confidence < self.min_confidence:
             return None
@@ -278,8 +280,9 @@ class WhaleDetector:
             direction=direction,
             confidence=confidence,
             source_posts=[post.id],
+            source_comments=[],
             mention_count=1,
-            total_score=post.score,
+            total_score=post.score,  # May be 0 from RSS
             details=details,
         )
 
@@ -389,14 +392,12 @@ class WhaleDetector:
     def detect_from_posts(
         self,
         posts: List[RedditPost],
-        include_comments: bool = True,
     ) -> Dict[str, WhaleActivity]:
         """
         Detect whale activity from a list of Reddit posts.
 
         Args:
             posts: List of RedditPost objects
-            include_comments: Whether to also analyze post comments
 
         Returns:
             Dictionary mapping symbols to WhaleActivity
@@ -414,13 +415,6 @@ class WhaleDetector:
                     direction=activity.direction.value,
                     confidence=activity.confidence,
                 )
-
-        # Optionally analyze comments (limit to posts with ticker mentions for efficiency)
-        if include_comments:
-            from reddit_monitor import RedditMonitor
-            # Note: We can't import RedditMonitor here without circular import
-            # Comments should be analyzed separately and passed in
-            pass
 
         # Aggregate by symbol
         aggregated = self.aggregate_activities(activities)

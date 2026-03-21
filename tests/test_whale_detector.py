@@ -199,14 +199,14 @@ class WhaleDetectorTests(unittest.TestCase):
 
         # Detector with higher thresholds
         detector = WhaleDetector(min_confidence=0.5, min_mention_count=2)
-        result = detector.detect_from_posts(posts, include_comments=False)
+        result = detector.detect_from_posts(posts)
 
         # Should be filtered out due to low confidence and mention count
         self.assertEqual(len(result), 0)
 
 
 class RedditMonitorTests(unittest.TestCase):
-    """Tests for the RedditMonitor class."""
+    """Tests for the RedditMonitor class (RSS-based implementation)."""
 
     def test_ticker_extraction(self) -> None:
         """Test extraction of ticker symbols from text."""
@@ -246,6 +246,23 @@ class RedditMonitorTests(unittest.TestCase):
 
         self.assertNotIn("A", tickers)
         self.assertIn("AAPL", tickers)
+
+    def test_monitor_initialization(self) -> None:
+        """Test that RedditMonitor initializes without API credentials."""
+        from reddit_monitor import RedditMonitor
+
+        monitor = RedditMonitor()
+        result = monitor.initialize()
+
+        # RSS-based monitor should always initialize successfully
+        self.assertTrue(result)
+
+    def test_monitor_custom_subreddits(self) -> None:
+        """Test initialization with custom subreddits."""
+        from reddit_monitor import RedditMonitor
+
+        monitor = RedditMonitor(subreddits=["technology", "investing"])
+        self.assertEqual(monitor.subreddits, ["technology", "investing"])
 
 
 if __name__ == "__main__":
