@@ -101,8 +101,9 @@ jobs:
           docker compose ps
           echo ""
           echo "=== Last 30 lines of app logs ==="
-          docker logs --tail 30 algo-trader-app 2>&1 || echo "Container not found or not started"
+          docker logs --tail 30 algo-trader-app-1 2>&1 || echo "Container not found or not started"
           echo ""
           echo "=== Last 30 lines of ib-gateway logs ==="
-          docker logs --tail 30 algo-trader-ib-gateway 2>&1 || echo "Container not found or not started"
+          docker logs --tail 30 algo-trader-ib-gateway-1 2>&1 || echo "Container not found or not started"
+          curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment successful"}' $SLACK_WEBHOOK_URL || echo "Failed to send test message to Slack"
           ENDSSH
