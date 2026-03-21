@@ -6,7 +6,25 @@ ibkr:
   local_port: 4002
   local_client_id: 1
 tickers:
+  # Major ETFs
+  - SPY
+  - QQQ
+  - IWM
+  # Mega-cap Tech
+  - AAPL
+  - MSFT
   - NVDA
+  - GOOGL
+  - AMZN
+  # High Beta
+  - TSLA
+  - AMD
+  - NFLX
+  # Others (existing)
+  - META
+  - INTC
+  - TQQQ
+  - VIX
 log_dir: "./logs"
 data_dir: "./data"
 schedule:
