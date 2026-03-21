@@ -15,7 +15,28 @@ env:
   TS_SSH_KEY: ${{ secrets.TAILSCALE_SSH_KEY }}
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          pytest -v --tb=short
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -105,5 +126,4 @@ jobs:
           echo ""
           echo "=== Last 30 lines of ib-gateway logs ==="
           docker logs --tail 30 algo-trader-ib-gateway-1 2>&1 || echo "Container not found or not started"
-          curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment successful"}' $SLACK_WEBHOOK_URL || echo "Failed to send test message to Slack"
           ENDSSH
