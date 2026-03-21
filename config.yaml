@@ -11,6 +11,7 @@ tickers:
   - NFLX
   - SPY
   - QQQ
+  - TQQQ
   - IWM
   - VIX
 log_dir: "./logs"
@@ -24,6 +25,7 @@ stock_data:
   history_dir: "./historydata/stock_prices"
   extra_ma_periods:
     - 50
+    - 200
   history_request:
     duration: "180 D"
     bar_size: "1 day"
@@ -87,6 +89,9 @@ strategies:
       vix_threshold: 35.0
       confirmation_sessions: 5
       enabled: false
+  TqqqQqqRotationStrategy:
+    params:
+      enabled: true
 schedule:
   times:
     - "06:30"
