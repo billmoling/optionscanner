@@ -316,20 +316,20 @@ class SignalValidationAgent:
             return "Option pricing looks balanced; position sizing discipline is important."
         return "The signal runs counter to the detected skew, so ensure risk controls are strict."
 
-def _peer_context(
-    self,
-    signal: TradeSignal,
-    peer_signals: Iterable[TradeSignal],
-) -> Optional[str]:
-    similar = [s for s in peer_signals if s.symbol == signal.symbol and s is not signal]
-    if not similar:
-        return None
-    same_direction = [s for s in similar if s.direction == signal.direction]
-    if len(same_direction) == len(similar):
-        return "Multiple strategies share this direction, adding conviction."
-    if not same_direction:
-        return "Other strategies disagree on direction; double-check assumptions."
-    return "Some strategies agree while others differ; weigh conviction before acting."
+    def _peer_context(
+        self,
+        signal: TradeSignal,
+        peer_signals: Iterable[TradeSignal],
+    ) -> Optional[str]:
+        similar = [s for s in peer_signals if s.symbol == signal.symbol and s is not signal]
+        if not similar:
+            return None
+        same_direction = [s for s in similar if s.direction == signal.direction]
+        if len(same_direction) == len(similar):
+            return "Multiple strategies share this direction, adding conviction."
+        if not same_direction:
+            return "Other strategies disagree on direction; double-check assumptions."
+        return "Some strategies agree while others differ; weigh conviction before acting."
 
 
 __all__ = [

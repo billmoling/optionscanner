@@ -401,6 +401,11 @@ class PositionCache:
         except (TypeError, ValueError):
             strike_val = None
         option = str(option_type or "").upper()
+        # Normalize C/P to CALL/PUT for consistent matching
+        if option == "C":
+            option = "CALL"
+        elif option == "P":
+            option = "PUT"
         expiry_val = str(expiry) if expiry is not None else ""
         return f"{str(symbol).upper()}::{option}::{strike_val}::{expiry_val}"
 

@@ -145,4 +145,4 @@ def test_position_cache_reconciles_positions(tmp_path) -> None:
 
     # Reconcile with no positions -> should mark closed
     cache.reconcile_with_positions([])
-    assert any(entry.status == "closed" for entry in cache._PositionCache__dict__["_entries"].values())  # type: ignore[attr-defined]
+    assert any(entry.status == "closed" for entry in cache._entries.values())

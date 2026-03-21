@@ -74,7 +74,7 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
             state = self._get_market_state(symbol)
             ma_value, ma_label = self._resolve_moving_average(snapshot, chain)
             directional = self._evaluate_directional_bias(
-                underlying_price, iv_rank, ma_value
+                underlying_price, iv_rank, ma_value, state
             )
 
             logger.info(
@@ -286,11 +286,22 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
         underlying_price: float,
         iv_rank: Optional[float],
         ma_value: Optional[float],
+        state: Optional[MarketState] = None,
     ) -> "DirectionalBias":
-        is_bullish = ma_value is None or underlying_price > ma_value
-        is_bearish = ma_value is not None and underlying_price < ma_value
+        # When no MA or market state available, allow both directions to be considered
+        if ma_value is None and state is None:
+            is_bullish = True
+            is_bearish = True
+        else:
+            is_bullish = ma_value is None or underlying_price > ma_value
+            is_bearish = ma_value is not None and underlying_price < ma_value
         if iv_rank is not None and iv_rank >= self.bearish_iv_rank_trigger:
             is_bearish = True
+        # Market state should influence directional bias
+        if state == MarketState.BEAR:
+            is_bearish = True
+        elif state in (MarketState.BULL, MarketState.UPTREND):
+            is_bullish = True
         return DirectionalBias(is_bullish=is_bullish, is_bearish=is_bearish)
 
     def _resolve_moving_average(self, snapshot: Any, chain: pd.DataFrame) -> Tuple[Optional[float], Optional[str]]:
