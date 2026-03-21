@@ -33,6 +33,9 @@ Configure these secrets in your GitHub repository settings (Settings → Secrets
 | `LOKI_URL` | Grafana Loki URL | Optional |
 | `LOKI_USERNAME` | Grafana Loki username | Optional |
 | `LOKI_PASSWORD` | Grafana Loki password | Optional |
+| `REDDIT_CLIENT_ID` | Reddit API client ID (for Whale Following) | Optional |
+| `REDDIT_CLIENT_SECRET` | Reddit API client secret (for Whale Following) | Optional |
+| `REDDIT_USER_AGENT` | Reddit API user agent | Optional |
 
 ## Tailscale Setup
 

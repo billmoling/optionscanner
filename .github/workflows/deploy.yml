@@ -102,6 +102,9 @@ jobs:
           LOKI_URL=${{ secrets.LOKI_URL }}
           LOKI_USERNAME=${{ secrets.LOKI_USERNAME }}
           LOKI_PASSWORD=${{ secrets.LOKI_PASSWORD }}
+          REDDIT_CLIENT_ID=${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET=${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USER_AGENT=${{ secrets.REDDIT_USER_AGENT }}
           ENVEOF
           chmod 600 .env
 
