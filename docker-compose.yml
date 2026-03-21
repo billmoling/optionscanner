@@ -1,4 +1,6 @@
+version: "3.8"
 name: algo-trader
+
 services:
   ib-gateway:
     restart: always
