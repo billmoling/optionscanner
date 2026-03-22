@@ -345,6 +345,7 @@ def main(argv: Optional[List[str]] = None) -> None:
                 indicator_processor=indicator_processor,
                 stock_history_kwargs=stock_history_kwargs,
                 trade_executor=trade_executor,
+                config=config,
             )
         )
         maybe_run_portfolio_manager(fetcher)

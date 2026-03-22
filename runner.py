@@ -17,11 +17,13 @@ from execution import TradeExecutor
 from notifications import SlackNotifier
 from option_data import BaseDataFetcher, OptionChainSnapshot
 from position_cache import ExitRecommendation, PositionCache
+from signal_ranking import SignalRanker, StrategyConfig, load_strategy_configs
 from stock_data import StockDataFetcher
 from technical_indicators import TechnicalIndicatorProcessor
 from market_state import DictMarketStateProvider, MarketStateClassifier, MarketStateResult
 from scheduling import compute_next_run, parse_schedule_times
 from strategies.base import BaseOptionStrategy, TradeSignal
+from trade_history import TradeHistory
 
 
 async def run_once(
@@ -37,6 +39,7 @@ async def run_once(
     indicator_processor: Optional[TechnicalIndicatorProcessor] = None,
     stock_history_kwargs: Optional[Dict[str, Any]] = None,
     trade_executor: Optional[TradeExecutor] = None,
+    config: Optional[Dict[str, Any]] = None,
 ) -> None:
     loop = asyncio.get_running_loop()
     if trade_executor:
@@ -77,6 +80,13 @@ async def run_once(
         for strategy in strategies:
             if hasattr(strategy, "market_state_provider"):
                 strategy.market_state_provider = state_provider
+
+    # Initialize trade history and signal ranker
+    data_dir = Path(config.get("data_dir", "./data")) if config else Path("./data")
+    trade_history = TradeHistory(data_dir / "trade_history.json")
+    strategy_configs = load_strategy_configs(config) if config else {}
+    ranker = SignalRanker(trade_history, strategy_configs, top_k=5)
+
     aggregated_signals: List[Tuple[str, TradeSignal]] = []
     for strategy in strategies:
         try:
@@ -95,79 +105,33 @@ async def run_once(
         logger.info("No trade signals generated in this iteration")
         return
     results_dir.mkdir(parents=True, exist_ok=True)
-    selection_agent = selection_agent or (SignalBatchSelector(enable_gemini=enable_gemini) if enable_gemini else None)
-    selection_result: BatchSelectionResult = (
-        selection_agent.select(aggregated_signals) if selection_agent else BatchSelectionResult([], None, None)
-    )
-    finalist_map = {selection.id: selection for selection in selection_result.selections}
 
+    # Rank signals using composite scoring
+    ranked_signals = ranker.rank_signals(aggregated_signals)
+
+    # Build rows with ranking data
     rows: List[Dict[str, Any]] = []
-    for idx, (strategy_name, signal) in enumerate(aggregated_signals, start=1):
-        row = asdict(signal)
-        row.update(
-            {
-                "strategy": strategy_name,
-                "gemini_id": idx,
-            }
-        )
-        selection = finalist_map.get(idx)
-        row["gemini_selected"] = selection is not None
-        row["gemini_score"] = selection.score if selection else None
-        row["gemini_reason"] = selection.reason if selection else None
-        if selection and selection.reason:
-            row["explanation"] = selection.reason
+    for score in ranked_signals:
+        row = score.to_dict()
         rows.append(row)
-    df = pd.DataFrame(rows)
-    preferred_order = [
-        "symbol",
-        "expiry",
-        "strike",
-        "option_type",
-        "strategy",
-        "direction",
-        "rationale",
-        "gemini_selected",
-        "gemini_score",
-        "gemini_reason",
-        "explanation",
-    ]
-    ordered_columns = [col for col in preferred_order if col in df.columns]
-    remaining_columns = [col for col in df.columns if col not in ordered_columns]
-    df = df[ordered_columns + remaining_columns]
-    file_path = results_dir / f"signals_{timestamp}.csv"
-    df.to_csv(file_path, index=False)
-    logger.info("Saved {count} signals to {path}", count=len(df), path=str(file_path))
 
-    if selection_agent and selection_result.response:
-        selection_path = results_dir / f"gemini_signal_selection_{timestamp}.json"
-        try:
-            payload = {
-                "as_of": timestamp,
-                "prompt": selection_result.prompt,
-                "response": selection_result.response,
-                "finalists": [
-                    {"id": sel.id, "score": sel.score, "reason": sel.reason} for sel in selection_result.selections
-                ],
-                "candidate_count": len(aggregated_signals),
-            }
-            selection_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            logger.info("Saved Gemini selection output to {path}", path=str(selection_path))
-        except Exception:
-            logger.warning("Failed to persist Gemini selection output", exc_info=True)
+    # Save all signals with scores to CSV
+    all_signals_df = pd.DataFrame(rows)
+    if not all_signals_df.empty:
+        file_path = results_dir / f"signals_{timestamp}.csv"
+        all_signals_df.to_csv(file_path, index=False)
+        logger.info("Saved {count} ranked signals to {path}", count=len(all_signals_df), path=str(file_path))
 
-    finalists_df = df[df["gemini_selected"] == True] if "gemini_selected" in df.columns else df.iloc[0:0]
-    finalist_payload: List[Tuple[str, TradeSignal, Optional[float], Optional[str]]] = []
-    for idx, (strategy_name, signal) in enumerate(aggregated_signals, start=1):
-        selection = finalist_map.get(idx)
-        if selection:
-            finalist_payload.append((strategy_name, signal, selection.score, selection.reason))
+    # Get top 5 for Slack and execution
+    finalist_payload = [(s.strategy_name, s.signal, s.composite_score, s.reason) for s in ranked_signals]
 
     if slack_notifier:
         loop = asyncio.get_running_loop()
-        if finalists_df.empty:
-            logger.info("No Gemini-selected finalists to send to Slack")
+        if not ranked_signals:
+            logger.info("No ranked signals to send to Slack")
         else:
-            await loop.run_in_executor(None, slack_notifier.send_signals, finalists_df, file_path)
+            await loop.run_in_executor(None, slack_notifier.send_ranked_signals, ranked_signals, file_path)
+
     if trade_executor and finalist_payload:
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
@@ -326,6 +290,7 @@ async def run_scheduler(
                     indicator_processor=indicator_processor,
                     stock_history_kwargs=stock_history_kwargs,
                     trade_executor=trade_executor,
+                    config=config,
                 )
             if post_run is not None:
                 try:

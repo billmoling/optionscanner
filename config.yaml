@@ -55,6 +55,7 @@ strategies:
       min_credit: 0.55
       short_target_delta: 0.25
       short_otm_pct: 0.035
+    published_win_rate: 0.70
   VerticalSpreadStrategy:
     params:
       spread_width: 5.0
@@ -64,11 +65,13 @@ strategies:
       max_iv_rank: 0.3
       min_risk_reward_ratio: 1.1
       bearish_iv_rank_trigger: 0.5
+    published_win_rate: 0.60
   CoveredCallStrategy:
     params:
       min_days_to_expiry: 21
       min_annualized_yield: 0.12
       enabled: false
+    published_win_rate: 0.75
   IronCondorStrategy:
     params:
       target_delta: 0.18
@@ -81,6 +84,7 @@ strategies:
         - SPY
         - QQQ
         - IWM
+    published_win_rate: 0.65
   PoorMansCoveredCallStrategy:
     params:
       leaps_min_days: 180
@@ -97,6 +101,7 @@ strategies:
       short_min_theta_abs: 0.02
       min_return_on_capital: 0.05
       max_trade_ideas: 5
+    published_win_rate: 0.65
   VixFearFadeStrategy:
     params:
       vix_symbol: "VIX"
@@ -104,15 +109,18 @@ strategies:
       vix_threshold: 35.0
       confirmation_sessions: 5
       enabled: false
+    published_win_rate: 0.55
   TqqqQqqRotationStrategy:
     params:
       enabled: true
+    published_win_rate: 0.60
   WhaleFollowingStrategy:
     params:
       enabled: false
       min_confidence: 0.5
       min_upvotes: 50
       max_positions: 3
+    published_win_rate: 0.50
 schedule:
   times:
     - "06:30"

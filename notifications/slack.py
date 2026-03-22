@@ -13,6 +13,8 @@ import pandas as pd
 import yaml
 from loguru import logger
 
+from signal_ranking import SignalScore
+
 
 PostCallable = Callable[[str, Dict[str, object]], None]
 
@@ -75,6 +77,58 @@ class SlackNotifier:
                     symbol=row.get("symbol"),
                     error=exc,
                 )
+
+    def send_ranked_signals(self, ranked_signals: List[SignalScore], csv_path: Optional[Path] = None) -> None:
+        """Send top ranked signals as a formatted Slack message when enabled."""
+        if not self.enabled:
+            logger.debug("Slack notifications are disabled; skipping send.")
+            return
+        if not self.settings.webhook_url:
+            logger.warning("Slack webhook URL is not configured; skipping notification.")
+            return
+        if not ranked_signals:
+            logger.info("No ranked signals to send to Slack.")
+            return
+
+        message = self._build_ranked_message(ranked_signals, csv_path)
+        payload = self._build_payload(message)
+        try:
+            self._post(self.settings.webhook_url, payload)
+            logger.info("Sent {count} ranked signals to Slack", count=len(ranked_signals))
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to send ranked signals to Slack | error={error}", error=exc)
+
+    def _build_ranked_message(self, ranked_signals: List[SignalScore], csv_path: Optional[Path]) -> str:
+        """Build a formatted Slack message with ranked signals table."""
+        from datetime import datetime, timezone
+
+        lines: List[str] = []
+
+        # Header with timestamp
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        lines.append(f"*{self.title}* | {timestamp}")
+        lines.append("")
+
+        # Table header
+        lines.append("| # | Symbol | Direction | Strategy | Score | Reason |")
+        lines.append("|---|----------|-----------|------------------|-------|--------|")
+
+        # Ranked signals
+        for idx, score in enumerate(ranked_signals, start=1):
+            direction = score.signal.direction.replace("_", " ").title()
+            reason_short = score.reason[:50] + "..." if len(score.reason) > 50 else score.reason
+            lines.append(
+                f"| {idx} | {score.signal.symbol} | {direction} | "
+                f"{score.strategy_name.replace('Strategy', '')} | "
+                f"{score.composite_score:.2f} | {reason_short} |"
+            )
+
+        # Footer
+        if csv_path:
+            lines.append("")
+            lines.append(f"Full results: `{csv_path}`")
+
+        return "\n".join(lines)
 
     def _build_payload(self, message: str) -> Dict[str, object]:
         payload: Dict[str, object] = {"text": message}

@@ -39,6 +39,9 @@ class TradeSignal:
     direction: str
     rationale: str
     legs: Tuple[SignalLeg, ...] = ()
+    risk_reward_ratio: Optional[float] = None
+    max_profit: Optional[float] = None
+    max_loss: Optional[float] = None
 
 
 class BaseOptionStrategy(Strategy, abc.ABC):
