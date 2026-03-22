@@ -17,7 +17,7 @@ import yaml
 from loguru import logger
 
 from dotenv import load_dotenv
-from logging_utils import configure_logging
+from logging_utils import configure_logging, LoggingContext
 from execution import (
     PortfolioActionExecutor,
     PortfolioExecutionConfig,
@@ -181,7 +181,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     os.environ.setdefault("APP_RUN_MODE", run_mode.value)
     config = load_config(args.config)
     log_dir = Path(config.get("log_dir", "./logs"))
-    configure_logging(log_dir, "strategy_signals", run_mode=run_mode.value)
+    log_config = config.get("logging", {})
+    configure_logging(log_dir, "strategy_signals", run_mode=run_mode.value, log_config=log_config)
 
     enable_gemini = bool(config.get("enable_gemini", True))
     portfolio_only = bool(args.portfolio_only)

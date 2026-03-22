@@ -127,16 +127,46 @@ class IBKRDataFetcher(BaseDataFetcher):
                 host=self.host,
                 port=self.port,
                 client_id=self.client_id,
+                component="ibkr_connection",
+                event_type="connect_start",
             )
-            await self._ib.connectAsync(self.host, self.port, clientId=self.client_id, timeout=5)
-            if not self._ib.isConnected():
-                raise ConnectionError("Failed to connect to IBKR Gateway")
-            self._set_market_data_type(self._market_data_type_code)
-            logger.info("Connected to IBKR Gateway")
+            try:
+                await self._ib.connectAsync(self.host, self.port, clientId=self.client_id, timeout=5)
+                if not self._ib.isConnected():
+                    logger.error(
+                        "Failed to connect to IBKR Gateway - not connected after attempt",
+                        component="ibkr_connection",
+                        event_type="connect_failed",
+                    )
+                    raise ConnectionError("Failed to connect to IBKR Gateway")
+                self._set_market_data_type(self._market_data_type_code)
+                logger.info(
+                    "Connected to IBKR Gateway successfully",
+                    component="ibkr_connection",
+                    event_type="connect_success",
+                )
+            except Exception as exc:
+                logger.error(
+                    "IBKR connection failed | error={error}",
+                    error=exc,
+                    component="ibkr_connection",
+                    event_type="connect_error",
+                )
+                raise
 
     async def disconnect(self) -> None:
         if self._ib.isConnected():
+            logger.info(
+                "Disconnecting from IBKR",
+                component="ibkr_connection",
+                event_type="disconnect_start",
+            )
             self._ib.disconnect()
+            logger.info(
+                "Disconnected from IBKR",
+                component="ibkr_connection",
+                event_type="disconnect_success",
+            )
 
     def _set_market_data_type(self, code: int, *, reason: Optional[str] = None) -> None:
         if self._current_market_data_type_code == code:
@@ -149,9 +179,16 @@ class IBKRDataFetcher(BaseDataFetcher):
                 "Set IBKR market data type to {market_data_type} ({reason})",
                 market_data_type=message,
                 reason=reason,
+                component="ibkr_connection",
+                event_type="market_data_type_change",
             )
         else:
-            logger.info("Set IBKR market data type to {market_data_type}", market_data_type=message)
+            logger.info(
+                "Set IBKR market data type to {market_data_type}",
+                market_data_type=message,
+                component="ibkr_connection",
+                event_type="market_data_type_set",
+            )
 
     async def _request_tickers(self, contracts: Sequence[Contract]) -> List[Any]:
         if not contracts:
@@ -358,6 +395,12 @@ class IBKRDataFetcher(BaseDataFetcher):
         return rows
 
     async def fetch_option_chain(self, symbol: str) -> OptionChainSnapshot:
+        logger.info(
+            "Fetching option chain | symbol={symbol}",
+            symbol=symbol,
+            component="option_data",
+            event_type="fetch_start",
+        )
         await self.connect()
         stock = Stock(symbol, "SMART", "USD")
         qualified_stock = await self._ib.qualifyContractsAsync(stock)
@@ -382,6 +425,8 @@ class IBKRDataFetcher(BaseDataFetcher):
                         symbol=symbol,
                         expiry=expiry,
                         exchange=exchange,
+                        component="option_data",
+                        event_type="contract_qualify_empty",
                     )
                     continue
                 tickers = await self._request_tickers(qualified)
@@ -392,6 +437,8 @@ class IBKRDataFetcher(BaseDataFetcher):
                         symbol=symbol,
                         expiry=expiry,
                         exchange=exchange,
+                        component="option_data",
+                        event_type="quote_fetch_empty",
                     )
                     continue
                 rows_by_conid.update(rows)
@@ -399,6 +446,12 @@ class IBKRDataFetcher(BaseDataFetcher):
                 break
 
         if not rows_by_conid:
+            logger.error(
+                "No option contracts selected for {symbol}",
+                symbol=symbol,
+                component="option_data",
+                event_type="fetch_failed",
+            )
             raise RuntimeError(f"No option contracts selected for {symbol}")
 
         snapshot = OptionChainSnapshot(
@@ -408,12 +461,24 @@ class IBKRDataFetcher(BaseDataFetcher):
             options=list(rows_by_conid.values()),
         )
         self._persist_snapshot(snapshot)
+        logger.info(
+            "Fetched option chain | symbol={symbol} options={count}",
+            symbol=symbol,
+            count=len(snapshot.options),
+            component="option_data",
+            event_type="fetch_success",
+        )
         return snapshot
 
     def _persist_snapshot(self, snapshot: OptionChainSnapshot) -> None:
         frame = snapshot.to_pandas()
         if frame.empty:
-            logger.warning("Skipping persistence for {symbol}; snapshot contained no rows", symbol=snapshot.symbol)
+            logger.warning(
+                "Skipping persistence for {symbol}; snapshot contained no rows",
+                symbol=snapshot.symbol,
+                component="option_data",
+                event_type="persist_skipped_empty",
+            )
             return
 
         frame = frame.copy()
@@ -423,28 +488,57 @@ class IBKRDataFetcher(BaseDataFetcher):
         timestamp_str = timestamp_utc.strftime("%Y%m%d_%H%M%S")
         file_path = self.data_dir / f"{snapshot.symbol}_{timestamp_str}.parquet"
         frame.to_parquet(file_path, index=False)
-        logger.info("Saved option snapshot to {path}", path=str(file_path))
+        logger.info(
+            "Saved option snapshot to {path} | symbol={symbol} rows={rows}",
+            path=str(file_path),
+            symbol=snapshot.symbol,
+            rows=len(frame),
+            component="option_data",
+            event_type="parquet_saved",
+        )
 
         timestamp_local = timestamp_utc.astimezone(self._history_timezone)
         frame["timestamp"] = timestamp_local.isoformat()
         history_path = self.history_dir / f"{timestamp_local.strftime('%Y%m%d')}.csv"
         header = not history_path.exists()
         frame.to_csv(history_path, mode="a", header=header, index=False)
-        logger.info("Appended option snapshot to history file {path}", path=str(history_path))
+        logger.debug(
+            "Appended option snapshot to history file {path}",
+            path=str(history_path),
+            symbol=snapshot.symbol,
+            component="option_data",
+            event_type="history_appended",
+        )
 
     async def fetch_all(self, symbols: Iterable[str]) -> List[OptionChainSnapshot]:
+        logger.info(
+            "Fetching option chains for {count} symbols | symbols={symbols}",
+            count=len(list(symbols)),
+            symbols=",".join(sorted(symbols)),
+            component="option_data",
+            event_type="fetch_all_start",
+        )
         tasks = [self.fetch_option_chain(symbol) for symbol in symbols]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         snapshots: List[OptionChainSnapshot] = []
         for symbol, result in zip(symbols, results):
             if isinstance(result, Exception):
-                logger.opt(exception=result).error(
+                logger.error(
                     "Failed to fetch data for {symbol}: {error}",
                     symbol=symbol,
                     error=result,
+                    component="option_data",
+                    event_type="fetch_symbol_failed",
                 )
                 continue
             snapshots.append(result)
+        logger.info(
+            "Completed fetch_all | symbols={count} successful={success}",
+            count=len(list(symbols)),
+            success=len(snapshots),
+            component="option_data",
+            event_type="fetch_all_complete",
+        )
         return snapshots
 
 

@@ -56,9 +56,24 @@ class SignalBatchSelector:
 
     def select(self, signals: List[tuple[str, TradeSignal]]) -> BatchSelectionResult:
         if not self.enable_gemini or not signals:
+            logger.debug(
+                "Batch Gemini selection skipped | enable_gemini={enabled} signals={count}",
+                enabled=self.enable_gemini,
+                count=len(signals),
+                component="ai_batch_selector",
+                event_type="selection_skipped",
+            )
             return BatchSelectionResult([], None, None)
         if self.client is None:
             self.client = GeminiClient()
+
+        logger.info(
+            "Starting batch Gemini selection | signals={count} top_k={top_k}",
+            count=len(signals),
+            top_k=self.top_k,
+            component="ai_batch_selector",
+            event_type="selection_start",
+        )
 
         system_prompt = (
             "You are an options desk lead. Review a list of candidate option trades and pick the strongest ideas. "
@@ -70,14 +85,41 @@ class SignalBatchSelector:
         )
         user_prompt = self._build_user_prompt(signals)
         try:
+            logger.debug(
+                "Sending prompt to Gemini | prompt_length={length}",
+                length=len(user_prompt),
+                component="ai_batch_selector",
+                event_type="gemini_request",
+            )
             response = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
+            logger.debug(
+                "Received response from Gemini | response_length={length}",
+                length=len(response) if response else 0,
+                component="ai_batch_selector",
+                event_type="gemini_response",
+            )
         except GeminiClientError as exc:
-            logger.warning("Batch Gemini selection failed | reason={error}", error=exc)
+            logger.warning(
+                "Batch Gemini selection failed | reason={error}",
+                error=exc,
+                component="ai_batch_selector",
+                event_type="gemini_error",
+            )
             return BatchSelectionResult([], user_prompt, None)
 
         selections = self._parse_response(response)
         if not selections:
-            logger.warning("Gemini selection returned no finalists; response may be unstructured")
+            logger.warning(
+                "Gemini selection returned no finalists; response may be unstructured",
+                component="ai_batch_selector",
+                event_type="selection_empty",
+            )
+        logger.info(
+            "Batch Gemini selection complete | selected={count}",
+            count=len(selections),
+            component="ai_batch_selector",
+            event_type="selection_complete",
+        )
         return BatchSelectionResult(selections, user_prompt, response)
 
     def _build_user_prompt(self, signals: List[tuple[str, TradeSignal]]) -> str:
@@ -193,19 +235,58 @@ class AISignalSelector:
             AISelectionResult with selected signals and AI reasoning
         """
         if not self.enable_gemini or not signals:
+            logger.debug(
+                "AI signal selection skipped | enable_gemini={enabled} signals={count}",
+                enabled=self.enable_gemini,
+                count=len(signals),
+                component="ai_signal_selector",
+                event_type="selection_skipped",
+            )
             return AISelectionResult([], {}, None, None)
 
         if self.client is None:
             self.client = GeminiClient()
 
+        logger.info(
+            "Starting AI signal selection | signals={count} top_k={top_k} has_context={has_context}",
+            count=len(signals),
+            top_k=self.top_k,
+            has_context=market_context is not None,
+            component="ai_signal_selector",
+            event_type="selection_start",
+        )
+
         system_prompt = self._build_system_prompt(market_context)
         user_prompt = self._build_user_prompt(signals)
 
         try:
+            logger.debug(
+                "Sending signal selection request to Gemini | prompt_length={length}",
+                length=len(user_prompt),
+                component="ai_signal_selector",
+                event_type="gemini_request",
+            )
             response = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
+            logger.debug(
+                "Received response from Gemini | response_length={length}",
+                length=len(response) if response else 0,
+                component="ai_signal_selector",
+                event_type="gemini_response",
+            )
         except GeminiClientError as exc:
-            logger.warning("AI signal selection failed | reason={error}", error=exc)
+            logger.warning(
+                "AI signal selection failed | reason={error}",
+                error=exc,
+                component="ai_signal_selector",
+                event_type="gemini_error",
+            )
             # Fallback: return first top_k signals
+            logger.info(
+                "Using fallback (first {top_k} signals) due to Gemini error",
+                top_k=self.top_k,
+                component="ai_signal_selector",
+                event_type="fallback_applied",
+            )
             return AISelectionResult(signals[: self.top_k], {}, user_prompt, None)
 
         # Parse selected signal IDs and reasons
@@ -225,12 +306,28 @@ class AISignalSelector:
                     reasons[signal_id] = item["reason"]
 
         # If AI didn't return enough, fill with top quantitative
-        while len(selected) < self.top_k and len(selected) < len(signals):
-            for i, sig_tuple in enumerate(signals):
-                if sig_tuple not in selected:
-                    selected.append(sig_tuple)
-                    break
+        if len(selected) < self.top_k:
+            original_count = len(selected)
+            while len(selected) < self.top_k and len(selected) < len(signals):
+                for i, sig_tuple in enumerate(signals):
+                    if sig_tuple not in selected:
+                        selected.append(sig_tuple)
+                        break
+            logger.debug(
+                "Filled selection from {original} to {final} signals (top_k={top_k})",
+                original=original_count,
+                final=len(selected),
+                top_k=self.top_k,
+                component="ai_signal_selector",
+                event_type="selection_filled",
+            )
 
+        logger.info(
+            "AI signal selection complete | selected={count}",
+            count=len(selected),
+            component="ai_signal_selector",
+            event_type="selection_complete",
+        )
         return AISelectionResult(selected, reasons, user_prompt, response)
 
     def _build_system_prompt(self, market_context: Optional[object] = None) -> str:

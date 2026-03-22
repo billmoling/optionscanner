@@ -79,6 +79,8 @@ class TradeExecutor:
             enabled=self._config.enabled,
             count=len(finalists),
             max_orders=self._config.max_orders,
+            component="trade_executor",
+            event_type="execution_start",
         )
         if not self._config.enabled:
             logger.debug("Trade executor disabled; skipping finalist execution")
@@ -90,11 +92,20 @@ class TradeExecutor:
                     "Skipping finalist execution due to max order cap | symbol={symbol} strategy={strategy}",
                     symbol=signal.symbol,
                     strategy=strategy,
+                    component="trade_executor",
+                    event_type="order_skipped_cap",
                 )
                 break
             snapshot = snapshots.get(signal.symbol.upper())
             plan = self._build_plan(signal, snapshot)
             if plan is None:
+                logger.warning(
+                    "Failed to build order plan | symbol={symbol} strategy={strategy}",
+                    symbol=signal.symbol,
+                    strategy=strategy,
+                    component="trade_executor",
+                    event_type="plan_build_failed",
+                )
                 continue
             result = self._submit(plan)
             reports.append(result)
@@ -103,6 +114,8 @@ class TradeExecutor:
                 symbol=signal.symbol,
                 strategy=strategy,
                 result=result,
+                component="trade_executor",
+                event_type="order_submitted",
             )
         if reports and self._slack and self._slack.enabled:
             message = "\n".join(["*AI Finalist Executions*"] + reports)
@@ -115,6 +128,8 @@ class TradeExecutor:
             "Finished finalist execution run | executed={executed} finalists={count}",
             executed=len(reports),
             count=len(finalists),
+            component="trade_executor",
+            event_type="execution_complete",
         )
         return reports
 
@@ -122,11 +137,23 @@ class TradeExecutor:
         self, signal: TradeSignal, snapshot: Optional[OptionChainSnapshot]
     ) -> Optional[OrderPlan]:
         try:
+            logger.debug(
+                "Building order plan | symbol={symbol} strategy={strategy}",
+                symbol=signal.symbol,
+                strategy=signal.direction,
+                component="trade_executor",
+                event_type="plan_build_start",
+            )
             expiry = signal.expiry if isinstance(signal.expiry, datetime) else None
             expiry_str = expiry.strftime("%Y%m%d") if expiry else str(signal.expiry)
             right = self._resolve_right(signal.option_type)
             if right is None:
-                logger.warning("Unable to resolve option right for signal | signal={signal}", signal=signal)
+                logger.warning(
+                    "Unable to resolve option right for signal | signal={signal}",
+                    signal=signal,
+                    component="trade_executor",
+                    event_type="plan_build_failed",
+                )
                 return None
             contract = Option(signal.symbol, expiry_str, float(signal.strike), right, "SMART", currency="USD")
             qualified = self._qualify_contract(contract)
@@ -137,6 +164,8 @@ class TradeExecutor:
                     expiry=expiry_str,
                     strike=signal.strike,
                     right=right,
+                    component="trade_executor",
+                    event_type="contract_qualify_failed",
                 )
                 return None
             contract = qualified[0]
@@ -153,6 +182,15 @@ class TradeExecutor:
                 "option_type": signal.option_type,
                 "limit_price": limit_price,
             }
+            logger.debug(
+                "Order plan built | symbol={symbol} side={side} quantity={quantity} limit={limit}",
+                symbol=signal.symbol,
+                side=side,
+                quantity=quantity,
+                limit=limit_price,
+                component="trade_executor",
+                event_type="plan_build_success",
+            )
             return OrderPlan(description=description, contract=contract, order=order, context=context)
         except Exception:
             logger.exception("Failed to assemble order plan | signal={signal}", signal=signal)
@@ -169,6 +207,12 @@ class TradeExecutor:
         self, signal: TradeSignal, snapshot: Optional[OptionChainSnapshot], side: Optional[str]
     ) -> Optional[float]:
         if snapshot is None:
+            logger.debug(
+                "No snapshot available for price derivation | symbol={symbol}",
+                symbol=signal.symbol,
+                component="trade_executor",
+                event_type="price_derive_no_snapshot",
+            )
             return None
         try:
             matches = [
@@ -179,9 +223,21 @@ class TradeExecutor:
                 and _compare_dates(row.get("expiry"), signal.expiry)
             ]
         except Exception:
-            logger.debug("Failed to search snapshot for price | symbol={symbol}", symbol=signal.symbol)
+            logger.debug(
+                "Failed to search snapshot for price | symbol={symbol}",
+                symbol=signal.symbol,
+                component="trade_executor",
+                event_type="price_derive_search_failed",
+            )
             matches = []
         if not matches:
+            logger.debug(
+                "No matching option found in snapshot for price | symbol={symbol} strike={strike}",
+                symbol=signal.symbol,
+                strike=signal.strike,
+                component="trade_executor",
+                event_type="price_derive_no_match",
+            )
             return None
         row = matches[0]
         bid = float(row.get("bid", 0.0) or 0.0)
@@ -197,9 +253,17 @@ class TradeExecutor:
                     bid=bid,
                     ask=ask,
                     spread=spread_pct,
+                    component="trade_executor",
+                    event_type="price_derive_wide_spread",
                 )
                 return None
         if not mid:
+            logger.debug(
+                "No valid mid price available | symbol={symbol}",
+                symbol=signal.symbol,
+                component="trade_executor",
+                event_type="price_derive_no_mid",
+            )
             return None
         padding = 1 + self._config.limit_padding_pct
         price = mid * padding
@@ -216,6 +280,8 @@ class TradeExecutor:
                     requested=price,
                     capped=upper_cap,
                     cap_pct=max_dev,
+                    component="trade_executor",
+                    event_type="price_clamped_buy",
                 )
                 price = upper_cap
             elif (side or "SELL") == "SELL" and price < lower_cap:
@@ -226,9 +292,19 @@ class TradeExecutor:
                     requested=price,
                     capped=lower_cap,
                     cap_pct=max_dev,
+                    component="trade_executor",
+                    event_type="price_clamped_sell",
                 )
                 price = lower_cap
 
+        logger.debug(
+            "Derived limit price | symbol={symbol} mid={mid} limit={price}",
+            symbol=signal.symbol,
+            mid=mid,
+            limit=price,
+            component="trade_executor",
+            event_type="price_derived",
+        )
         return price
 
     @staticmethod
@@ -272,25 +348,43 @@ class TradeExecutor:
 
     def _submit(self, plan: OrderPlan) -> str:
         try:
+            logger.info(
+                "Submitting order | {description}",
+                description=plan.description,
+                component="trade_executor",
+                event_type="order_submit",
+            )
             trade = self._ib.placeOrder(plan.contract, plan.order)
             order_id = getattr(getattr(trade, "order", None), "orderId", None)
             status = getattr(getattr(trade, "orderStatus", None), "status", "submitted")
+            logger.info(
+                "Order submitted | orderId={order_id} status={status} | {description}",
+                description=plan.description,
+                order_id=order_id,
+                status=status,
+                component="trade_executor",
+                event_type="order_placed",
+            )
             return f"{plan.description} | orderId={order_id} status={status}"
         except Exception as exc:
-            logger.warning(
+            logger.error(
                 "IBKR order submission failed | description={description} error={error}",
                 description=plan.description,
                 error=exc,
+                component="trade_executor",
+                event_type="order_submit_error",
             )
             return f"{plan.description} | failed: {exc}"
 
     def _on_ib_error(self, req_id: int, code: int, msg: str, advanced: object = None) -> None:
-        logger.warning(
+        logger.error(
             "IBKR error | req_id={req_id} code={code} msg={msg} advanced={advanced}",
             req_id=req_id,
             code=code,
             msg=msg,
             advanced=advanced,
+            component="trade_executor",
+            event_type="ibkr_error",
         )
 
     def _on_order_status(self, trade) -> None:
@@ -302,25 +396,39 @@ class TradeExecutor:
         why = getattr(status_obj, "whyHeld", None)
         order_id = getattr(status_obj, "orderId", None)
         action = getattr(order, "action", None)
-        if str(status).upper() in {"CANCELLED", "INACTIVE", "APICANCELLED"}:
+
+        # Determine log level based on status
+        is_error = str(status).upper() in {"CANCELLED", "INACTIVE", "APICANCELLED", "REJECTED"}
+        log_level = "warning" if is_error else "debug"
+
+        log_msg = (
+            "Order status update | orderId={order_id} status={status} action={action} "
+            "filled={filled} remaining={remaining} why={why}"
+        )
+
+        if is_error:
             logger.warning(
-                "Order cancelled | orderId={order_id} status={status} action={action} filled={filled} remaining={remaining} why={why}",
+                log_msg,
                 order_id=order_id,
                 status=status,
                 action=action,
                 filled=filled,
                 remaining=remaining,
                 why=why,
+                component="trade_executor",
+                event_type="order_status_error",
             )
         else:
             logger.debug(
-                "Order status update | orderId={order_id} status={status} action={action} filled={filled} remaining={remaining} why={why}",
+                log_msg,
                 order_id=order_id,
                 status=status,
                 action=action,
                 filled=filled,
                 remaining=remaining,
                 why=why,
+                component="trade_executor",
+                event_type="order_status_update",
             )
 
 

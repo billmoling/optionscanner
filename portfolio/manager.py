@@ -68,20 +68,47 @@ class PortfolioManager:
         return data
 
     def load_positions(self) -> pd.DataFrame:
-        logger.info("Loading portfolio positions")
+        logger.info(
+            "Loading portfolio positions",
+            component="portfolio_manager",
+            event_type="load_positions_start",
+        )
         self.positions = self._position_loader.load()
+        logger.info(
+            "Loaded {count} positions",
+            count=len(self.positions),
+            component="portfolio_manager",
+            event_type="load_positions_complete",
+        )
         return self.positions
 
     def compute_greeks(self) -> GreekSummary:
-        logger.info("Computing portfolio greeks")
+        logger.info(
+            "Computing portfolio greeks",
+            component="portfolio_manager",
+            event_type="compute_greeks_start",
+        )
         calculator = GreekCalculator(self._ib)
         self.greek_summary = calculator.compute(self.positions)
         concentration_df, _ = compute_concentration(self.positions)
         self.concentration = concentration_df
+        logger.info(
+            "Portfolio greeks computed | delta={delta} gamma={gamma} theta={theta} vega={vega}",
+            delta=self.greek_summary.totals.get("delta"),
+            gamma=self.greek_summary.totals.get("gamma"),
+            theta=self.greek_summary.totals.get("theta"),
+            vega=self.greek_summary.totals.get("vega"),
+            component="portfolio_manager",
+            event_type="compute_greeks_complete",
+        )
         return self.greek_summary
 
     def evaluate_rules(self) -> List[RiskBreach]:
-        logger.info("Evaluating risk limits")
+        logger.info(
+            "Evaluating risk limits",
+            component="portfolio_manager",
+            event_type="evaluate_rules_start",
+        )
         evaluator = RiskEvaluator(self._risk_config)
         self.breaches = evaluator.evaluate(
             self.greek_summary.per_symbol,
@@ -89,17 +116,45 @@ class PortfolioManager:
             self.concentration,
             self.positions,
         )
+        if self.breaches:
+            logger.warning(
+                "Risk limits breached | count={count}",
+                count=len(self.breaches),
+                component="portfolio_manager",
+                event_type="risk_breach_detected",
+            )
+        else:
+            logger.info(
+                "No risk limits breached",
+                component="portfolio_manager",
+                event_type="evaluate_rules_complete",
+            )
         return self.breaches
 
     def generate_actions(self) -> List[str]:
-        logger.info("Generating playbook actions")
+        logger.info(
+            "Generating playbook actions | breaches={count}",
+            count=len(self.breaches),
+            component="portfolio_manager",
+            event_type="generate_actions_start",
+        )
         context = PlaybookContext(roll_rules=self._risk_config.roll_rules)
         engine = PlaybookEngine(context)
         self.actions = engine.generate(self.positions, self.breaches)
+        logger.info(
+            "Generated {count} playbook actions",
+            count=len(self.actions),
+            component="portfolio_manager",
+            event_type="generate_actions_complete",
+        )
         return self.actions
 
     def notify(self) -> str:
-        logger.info("Preparing portfolio notifications")
+        logger.info(
+            "Preparing portfolio notifications",
+            component="portfolio_manager",
+            event_type="notify_start",
+        )
         message = self._reporter.build_summary_message(
             self.greek_summary.totals,
             self.concentration,
@@ -112,14 +167,31 @@ class PortfolioManager:
             csv_path, _json_unused, timestamp = self._reporter.write_outputs(
                 self.positions, self.greek_summary.per_symbol
             )
+            logger.info(
+                "Portfolio outputs written | csv={path}",
+                path=csv_path,
+                component="portfolio_manager",
+                event_type="outputs_written",
+            )
             self.last_gemini_response = self._reporter.evaluate_positions_with_gemini(
                 self.positions, timestamp
             )
+            if self.last_gemini_response:
+                logger.info(
+                    "Gemini portfolio evaluation completed",
+                    component="portfolio_manager",
+                    event_type="gemini_evaluation_complete",
+                )
         except Exception as exc:
             logger.warning("Failed to write portfolio CSV | reason={error}", error=exc)
             csv_path = None
         self._reporter.log_details(message)
         self._reporter.send_notifications(message, csv_path)
+        logger.info(
+            "Portfolio notification sent",
+            component="portfolio_manager",
+            event_type="notify_complete",
+        )
         return message
 
 

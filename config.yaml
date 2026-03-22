@@ -164,6 +164,18 @@ slack:
   icon_emoji: ":chart_with_upwards_trend:"
   title: "Daily Option Scanner Signals"
   max_rows: 30
+logging:
+  # Grafana Loki configuration for centralized logging
+  loki:
+    enabled: true  # Set to false to disable Loki logging
+    batch_size: 100  # Number of logs to batch before sending
+    flush_interval: 5  # Seconds between flushes
+  console:
+    level: "INFO"  # Log level for console output
+  file:
+    level: "DEBUG"  # Log level for file output
+    rotation: "1 week"
+    retention: "90 days"
 automation:
   enabled: false
   trade_execution:
