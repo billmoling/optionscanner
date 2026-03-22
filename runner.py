@@ -164,27 +164,38 @@ async def run_once(
         market_context=market_context.get_context().to_dict() if market_context.get_context() else None,
     )
 
-    # Build rows with ranking data (combine AI picks + quantitative picks)
+    # Save all signals to CSV for reference
+    file_path = results_dir / f"signals_{timestamp}.csv"
     rows: List[Dict[str, Any]] = []
-    ai_signal_ids = set()
     for strategy_name, signal in ai_result.selections:
-        signal_id = f"{signal.symbol}_{strategy_name}"
-        ai_signal_ids.add(signal_id)
-
-    # Save all signals with scores to CSV
-    all_signals_df = pd.DataFrame(rows)
-    if not all_signals_df.empty:
-        file_path = results_dir / f"signals_{timestamp}.csv"
+        rows.append({
+            "symbol": signal.symbol,
+            "strategy": strategy_name,
+            "direction": signal.direction,
+            "rationale": signal.rationale,
+        })
+    for score in ranked_signals:
+        rows.append({
+            "symbol": score.signal.symbol,
+            "strategy": score.strategy_name,
+            "direction": score.signal.direction,
+            "rationale": score.signal.rationale,
+            "composite_score": score.composite_score,
+        })
+    if rows:
+        all_signals_df = pd.DataFrame(rows)
         all_signals_df.to_csv(file_path, index=False)
-        logger.info("Saved {count} ranked signals to {path}", count=len(all_signals_df), path=str(file_path))
+        logger.info("Saved {count} signals to {path}", count=len(all_signals_df), path=str(file_path))
+    else:
+        file_path = None
 
     # Get top 5 for execution (quantitative ranking)
     finalist_payload = [(s.strategy_name, s.signal, s.composite_score, s.reason) for s in ranked_signals]
 
     if slack_notifier:
         loop = asyncio.get_running_loop()
-        if not ranked_signals:
-            logger.info("No ranked signals to send to Slack")
+        if not ranked_signals and not ai_result.selections:
+            logger.info("No signals to send to Slack")
         else:
             # Send both AI picks (5) and quantitative picks (5) = 10 total
             await loop.run_in_executor(

@@ -5,7 +5,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from statistics import mean
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from loguru import logger
 
@@ -79,6 +79,88 @@ class SignalBatchSelector:
         if not selections:
             logger.warning("Gemini selection returned no finalists; response may be unstructured")
         return BatchSelectionResult(selections, user_prompt, response)
+
+    def _build_user_prompt(self, signals: List[tuple[str, TradeSignal]]) -> str:
+        lines = [
+            "Evaluate these option trade signals. Consider directional edge, risk, and simplicity.",
+            "Pick the top ideas only; skip low-quality trades.",
+            "",
+            "Signals:",
+        ]
+        for idx, (strategy, signal) in enumerate(signals, start=1):
+            expiry_text = signal.expiry.date().isoformat() if hasattr(signal.expiry, "date") else str(signal.expiry)
+            leg_summary = self._format_leg_summary(signal)
+            lines.append(
+                f"{idx}. Strategy: {strategy} | Symbol: {signal.symbol} | Direction: {signal.direction} | "
+                f"Option: {signal.option_type} {signal.strike:.2f} exp {expiry_text}"
+                + (f" | Legs: {leg_summary}" if leg_summary else "")
+                + f" | Rationale: {signal.rationale}"
+            )
+        lines.append("")
+        lines.append("Return JSON only.")
+        return "\n".join(lines)
+
+    def _parse_response(self, response: str) -> List[GeminiSelection]:
+        if not response:
+            return []
+        candidates = [response]
+        if "```" in response:
+            candidates.extend(part for part in response.split("```") if part and "{" in part)
+
+        for candidate in candidates:
+            try:
+                cleaned = candidate.strip()
+                if cleaned.startswith("json"):
+                    cleaned = cleaned[len("json") :].strip()
+                start = cleaned.find("{")
+                end = cleaned.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    cleaned = cleaned[start : end + 1]
+                data = json.loads(cleaned)
+                selections = self._extract_selections(data)
+                if selections:
+                    return selections
+            except json.JSONDecodeError:
+                continue
+        return []
+
+    def _extract_selections(self, data: object) -> List[GeminiSelection]:
+        if not isinstance(data, dict):
+            return []
+        finalists = data.get("finalists")
+        if not isinstance(finalists, list):
+            return []
+        selections: List[GeminiSelection] = []
+        for item in finalists:
+            if not isinstance(item, dict):
+                continue
+            idx_raw = item.get("id")
+            try:
+                idx = int(idx_raw)
+            except (TypeError, ValueError):
+                continue
+            score_raw = item.get("score")
+            try:
+                score = float(score_raw) if score_raw is not None else None
+            except (TypeError, ValueError):
+                score = None
+            reason = item.get("reason")
+            if isinstance(reason, str):
+                reason = reason.strip()
+            selections.append(GeminiSelection(id=idx, score=score, reason=reason or None))
+        return selections
+
+    @staticmethod
+    def _format_leg_summary(signal: TradeSignal) -> str:
+        if not getattr(signal, "legs", None):
+            return ""
+        parts = []
+        for leg in signal.legs:
+            parts.append(
+                f"{getattr(leg, 'action', '?')}/{getattr(leg, 'option_type', '?')} "
+                f"{getattr(leg, 'strike', '?')}"
+            )
+        return " / ".join(parts)
 
 
 @dataclass(slots=True)
@@ -256,88 +338,6 @@ class AISignalSelector:
                 continue
 
         return result[: self.top_k]  # Limit to top_k
-
-    def _build_user_prompt(self, signals: List[tuple[str, TradeSignal]]) -> str:
-        lines = [
-            "Evaluate these option trade signals. Consider directional edge, risk, and simplicity.",
-            "Pick the top ideas only; skip low-quality trades.",
-            "",
-            "Signals:",
-        ]
-        for idx, (strategy, signal) in enumerate(signals, start=1):
-            expiry_text = signal.expiry.date().isoformat() if hasattr(signal.expiry, "date") else str(signal.expiry)
-            leg_summary = self._format_leg_summary(signal)
-            lines.append(
-                f"{idx}. Strategy: {strategy} | Symbol: {signal.symbol} | Direction: {signal.direction} | "
-                f"Option: {signal.option_type} {signal.strike:.2f} exp {expiry_text}"
-                + (f" | Legs: {leg_summary}" if leg_summary else "")
-                + f" | Rationale: {signal.rationale}"
-            )
-        lines.append("")
-        lines.append("Return JSON only.")
-        return "\n".join(lines)
-
-    def _parse_response(self, response: str) -> List[GeminiSelection]:
-        if not response:
-            return []
-        candidates = [response]
-        if "```" in response:
-            candidates.extend(part for part in response.split("```") if part and "{" in part)
-
-        for candidate in candidates:
-            try:
-                cleaned = candidate.strip()
-                if cleaned.startswith("json"):
-                    cleaned = cleaned[len("json") :].strip()
-                start = cleaned.find("{")
-                end = cleaned.rfind("}")
-                if start != -1 and end != -1 and end > start:
-                    cleaned = cleaned[start : end + 1]
-                data = json.loads(cleaned)
-                selections = self._extract_selections(data)
-                if selections:
-                    return selections
-            except json.JSONDecodeError:
-                continue
-        return []
-
-    def _extract_selections(self, data: object) -> List[GeminiSelection]:
-        if not isinstance(data, dict):
-            return []
-        finalists = data.get("finalists")
-        if not isinstance(finalists, list):
-            return []
-        selections: List[GeminiSelection] = []
-        for item in finalists:
-            if not isinstance(item, dict):
-                continue
-            idx_raw = item.get("id")
-            try:
-                idx = int(idx_raw)
-            except (TypeError, ValueError):
-                continue
-            score_raw = item.get("score")
-            try:
-                score = float(score_raw) if score_raw is not None else None
-            except (TypeError, ValueError):
-                score = None
-            reason = item.get("reason")
-            if isinstance(reason, str):
-                reason = reason.strip()
-            selections.append(GeminiSelection(id=idx, score=score, reason=reason or None))
-        return selections
-
-    @staticmethod
-    def _format_leg_summary(signal: TradeSignal) -> str:
-        if not getattr(signal, "legs", None):
-            return ""
-        parts = []
-        for leg in signal.legs:
-            parts.append(
-                f"{getattr(leg, 'action', '?')}/{getattr(leg, 'option_type', '?')} "
-                f"{getattr(leg, 'strike', '?')}"
-            )
-        return " / ".join(parts)
 
 
 @dataclass(slots=True)
