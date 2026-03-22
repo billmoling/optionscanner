@@ -12,7 +12,7 @@ import pandas as pd
 from loguru import logger
 from zoneinfo import ZoneInfo
 
-from ai_agents import BatchSelectionResult, SignalBatchSelector
+from ai_agents import BatchSelectionResult, SignalBatchSelector, AISignalSelector, AISelectionResult
 from execution import TradeExecutor
 from notifications import SlackNotifier
 from option_data import BaseDataFetcher, OptionChainSnapshot
@@ -127,13 +127,7 @@ async def run_once(
         symbols=symbol_list,
     )
 
-    ranker = SignalRanker(
-        trade_history=trade_history,
-        strategy_configs=strategy_configs,
-        top_k=5,
-        market_context=market_context,
-    )
-
+    # Collect signals from all strategies
     aggregated_signals: List[Tuple[str, TradeSignal]] = []
     for strategy in strategies:
         try:
@@ -143,6 +137,7 @@ async def run_once(
                 cache.record_signal(strategy.name, signal, snapshot_by_symbol.get((signal.symbol or "").upper()))
         except Exception:
             logger.exception("Strategy {name} failed", name=strategy.name)
+
     exit_recommendations = cache.evaluate_exits(snapshot_by_symbol)
     cache.save()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -153,14 +148,28 @@ async def run_once(
         return
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Rank signals using composite scoring
+    # Rank signals using composite scoring (top 5 quantitative)
+    ranker = SignalRanker(
+        trade_history=trade_history,
+        strategy_configs=strategy_configs,
+        top_k=5,
+        market_context=market_context,
+    )
     ranked_signals = ranker.rank_signals(aggregated_signals)
 
-    # Build rows with ranking data
+    # AI signal selection (top 5 qualitative)
+    ai_selector = AISignalSelector(enable_gemini=enable_gemini, top_k=5)
+    ai_result = ai_selector.select(
+        aggregated_signals,
+        market_context=market_context.get_context().to_dict() if market_context.get_context() else None,
+    )
+
+    # Build rows with ranking data (combine AI picks + quantitative picks)
     rows: List[Dict[str, Any]] = []
-    for score in ranked_signals:
-        row = score.to_dict()
-        rows.append(row)
+    ai_signal_ids = set()
+    for strategy_name, signal in ai_result.selections:
+        signal_id = f"{signal.symbol}_{strategy_name}"
+        ai_signal_ids.add(signal_id)
 
     # Save all signals with scores to CSV
     all_signals_df = pd.DataFrame(rows)
@@ -169,7 +178,7 @@ async def run_once(
         all_signals_df.to_csv(file_path, index=False)
         logger.info("Saved {count} ranked signals to {path}", count=len(all_signals_df), path=str(file_path))
 
-    # Get top 5 for Slack and execution
+    # Get top 5 for execution (quantitative ranking)
     finalist_payload = [(s.strategy_name, s.signal, s.composite_score, s.reason) for s in ranked_signals]
 
     if slack_notifier:
@@ -177,9 +186,10 @@ async def run_once(
         if not ranked_signals:
             logger.info("No ranked signals to send to Slack")
         else:
-            # Pass market context to Slack notifier for header
+            # Send both AI picks (5) and quantitative picks (5) = 10 total
             await loop.run_in_executor(
-                None, slack_notifier.send_ranked_signals, ranked_signals, file_path, market_context
+                None, slack_notifier.send_ai_and_quant_signals,
+                ai_result.selections, ai_result.ai_reasons, ranked_signals, file_path, market_context
             )
 
     if trade_executor and finalist_payload:

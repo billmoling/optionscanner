@@ -19,6 +19,16 @@ from strategies.base import TradeSignal
 
 
 @dataclass(slots=True)
+class AISelectionResult:
+    """Result from AI signal selection."""
+
+    selections: List[tuple[str, TradeSignal]]  # List of (strategy_name, signal) tuples
+    ai_reasons: Dict[str, str]  # signal_id -> reason
+    prompt: Optional[str]
+    response: Optional[str]
+
+
+@dataclass(slots=True)
 class GeminiSelection:
     """Represents a Gemini-chosen finalist from a batch review."""
 
@@ -69,6 +79,183 @@ class SignalBatchSelector:
         if not selections:
             logger.warning("Gemini selection returned no finalists; response may be unstructured")
         return BatchSelectionResult(selections, user_prompt, response)
+
+
+@dataclass(slots=True)
+class AISignalSelector:
+    """AI-powered signal selector using Gemini 2.5.
+
+    Selects top K signals from a batch using qualitative analysis:
+    - Signal rationale quality
+    - Risk/reward intuition
+    - Market context awareness
+    - Diversification (prefers different symbols/strategies)
+    """
+
+    client: Optional[GeminiClient] = None
+    enable_gemini: bool = True
+    top_k: int = 5
+
+    def select(
+        self,
+        signals: List[tuple[str, TradeSignal]],
+        market_context: Optional[object] = None,
+    ) -> AISelectionResult:
+        """Select top K signals using AI.
+
+        Args:
+            signals: List of (strategy_name, TradeSignal) tuples
+            market_context: Optional market context (VIX, market state, earnings)
+
+        Returns:
+            AISelectionResult with selected signals and AI reasoning
+        """
+        if not self.enable_gemini or not signals:
+            return AISelectionResult([], {}, None, None)
+
+        if self.client is None:
+            self.client = GeminiClient()
+
+        system_prompt = self._build_system_prompt(market_context)
+        user_prompt = self._build_user_prompt(signals)
+
+        try:
+            response = self.client.generate(system_prompt=system_prompt, user_prompt=user_prompt)
+        except GeminiClientError as exc:
+            logger.warning("AI signal selection failed | reason={error}", error=exc)
+            # Fallback: return first top_k signals
+            return AISelectionResult(signals[: self.top_k], {}, user_prompt, None)
+
+        # Parse selected signal IDs and reasons
+        selection_map = self._parse_response(response, len(signals))
+
+        # Convert IDs back to signals
+        selected = []
+        reasons = {}
+        for item in selection_map:
+            idx = item["id"] - 1  # Convert 1-based to 0-based
+            if 0 <= idx < len(signals):
+                strategy_name, signal = signals[idx]
+                selected.append((strategy_name, signal))
+                # Use signal symbol as key for reasons
+                signal_id = f"{signal.symbol}_{strategy_name}"
+                if item.get("reason"):
+                    reasons[signal_id] = item["reason"]
+
+        # If AI didn't return enough, fill with top quantitative
+        while len(selected) < self.top_k and len(selected) < len(signals):
+            for i, sig_tuple in enumerate(signals):
+                if sig_tuple not in selected:
+                    selected.append(sig_tuple)
+                    break
+
+        return AISelectionResult(selected, reasons, user_prompt, response)
+
+    def _build_system_prompt(self, market_context: Optional[object] = None) -> str:
+        """Build system prompt for AI signal selection."""
+        base_prompt = (
+            "You are a senior options trader with 20+ years of experience. "
+            "Your task is to select the top 5 most compelling trade ideas from a list of signals. "
+            "Consider: "
+            "1. Quality of rationale - does the reasoning make sense? "
+            "2. Risk/reward profile - is the potential payoff worth the risk? "
+            "3. Market context - does the trade align with current market conditions? "
+            "4. Diversification - prefer a mix of symbols and strategies rather than concentrated bets. "
+            "5. Conviction - select only trades you would actually put money on. "
+            "Return ONLY valid JSON with this exact structure: "
+            '{"selections":[{"id":<signal_number>,"reason":"one sentence why this is a top pick"}]} '
+            "Signal numbers are 1-based indices from the list. Select exactly 5 signals."
+        )
+
+        if market_context:
+            # Add market context if available
+            context_note = (
+                "Market Context: "
+                f"VIX={market_context.get('vix_level', 'N/A')}, "
+                f"SPY={market_context.get('spy_state', 'N/A')}, "
+                f"QQQ={market_context.get('qqq_state', 'N/A')}. "
+                "Consider whether signals align with or hedge against current market conditions."
+            )
+            base_prompt += " " + context_note
+
+        return base_prompt
+
+    def _build_user_prompt(self, signals: List[tuple[str, TradeSignal]]) -> str:
+        """Build user prompt with signal details."""
+        lines = [
+            "Select the top 5 most compelling trades from this list.",
+            "Return JSON only, no explanations.",
+            "",
+            "Signals:",
+        ]
+
+        for idx, (strategy, signal) in enumerate(signals, start=1):
+            expiry_text = signal.expiry.date().isoformat() if hasattr(signal.expiry, "date") else str(signal.expiry)
+            rr_info = ""
+            if hasattr(signal, "risk_reward_ratio") and signal.risk_reward_ratio:
+                rr_info = f" | R/R={signal.risk_reward_ratio:.2f}"
+
+            lines.append(
+                f"{idx}. Strategy: {strategy} | Symbol: {signal.symbol} | Direction: {signal.direction} | "
+                f"Option: {signal.option_type} {signal.strike:.2f} exp {expiry_text}{rr_info} | "
+                f"Rationale: {signal.rationale}"
+            )
+
+        lines.append("")
+        lines.append("Return exactly 5 selections in JSON format.")
+        return "\n".join(lines)
+
+    def _parse_response(self, response: str, signal_count: int) -> List[Dict[str, object]]:
+        """Parse JSON response from AI."""
+        if not response:
+            return []
+
+        # Handle markdown code blocks
+        text = response.strip()
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # Try to extract JSON
+            import re
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    logger.warning("Could not parse AI selection response")
+                    return []
+            else:
+                logger.warning("No JSON found in AI selection response")
+                return []
+
+        if not isinstance(data, dict):
+            return []
+
+        selections = data.get("selections", [])
+        if not isinstance(selections, list):
+            return []
+
+        result = []
+        for item in selections:
+            if not isinstance(item, dict):
+                continue
+
+            try:
+                idx = int(item.get("id", 0))
+                if 1 <= idx <= signal_count:
+                    result.append({
+                        "id": idx,
+                        "reason": item.get("reason", ""),
+                    })
+            except (TypeError, ValueError):
+                continue
+
+        return result[: self.top_k]  # Limit to top_k
 
     def _build_user_prompt(self, signals: List[tuple[str, TradeSignal]]) -> str:
         lines = [
@@ -339,6 +526,8 @@ class SignalValidationAgent:
 __all__ = [
     "SignalValidationAgent",
     "SignalBatchSelector",
+    "AISignalSelector",
+    "AISelectionResult",
     "GeminiSelection",
     "BatchSelectionResult",
     "GeminiClient",

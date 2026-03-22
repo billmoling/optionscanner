@@ -106,6 +106,112 @@ class SlackNotifier:
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.exception("Failed to send ranked signals to Slack | error={error}", error=exc)
 
+    def send_ai_and_quant_signals(
+        self,
+        ai_selections: List[tuple],
+        ai_reasons: Dict[str, str],
+        quant_picks: List[SignalScore],
+        csv_path: Optional[Path] = None,
+        market_context: Optional[MarketContextProvider] = None,
+    ) -> None:
+        """Send AI picks (5) and quantitative picks (5) as a formatted Slack message.
+
+        Args:
+            ai_selections: List of (strategy_name, signal) tuples from AI selection
+            ai_reasons: Dict mapping signal_id to AI reason
+            quant_picks: List of SignalScore from quantitative ranking
+            csv_path: Optional path to CSV file
+            market_context: Optional market context provider
+        """
+        if not self.enabled:
+            logger.debug("Slack notifications are disabled; skipping send.")
+            return
+        if not self.settings.webhook_url:
+            logger.warning("Slack webhook URL is not configured; skipping notification.")
+            return
+        if not ai_selections and not quant_picks:
+            logger.info("No signals to send to Slack.")
+            return
+
+        message = self._build_ai_and_quant_message(
+            ai_selections, ai_reasons, quant_picks, csv_path, market_context
+        )
+        payload = self._build_payload(message)
+        try:
+            self._post(self.settings.webhook_url, payload)
+            total = len(ai_selections) + len(quant_picks)
+            logger.info("Sent {count} signals to Slack (AI={ai} + Quant={quant})",
+                       count=total, ai=len(ai_selections), quant=len(quant_picks))
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to send AI+quant signals to Slack | error={error}", error=exc)
+
+    def _build_ai_and_quant_message(
+        self,
+        ai_selections: List[tuple],
+        ai_reasons: Dict[str, str],
+        quant_picks: List[SignalScore],
+        csv_path: Optional[Path] = None,
+        market_context: Optional[MarketContextProvider] = None,
+    ) -> str:
+        """Build Slack message with AI picks and quantitative picks sections."""
+        from datetime import datetime, timezone
+
+        lines: List[str] = []
+
+        # Header with timestamp
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        lines.append(f"*{self.title}* | {timestamp}")
+        lines.append("")
+
+        # Market context header (if available)
+        if market_context:
+            context_result = market_context.get_context()
+            if context_result:
+                context_lines = self._format_market_context(context_result)
+                lines.extend(context_lines)
+                lines.append("")
+
+        # AI Picks section
+        if ai_selections:
+            lines.append("*-- AI Top Picks --*")
+            lines.append("| # | Symbol | Direction | Strategy | AI Reason |")
+            lines.append("|---|----------|-----------|------------------|------------|")
+
+            for idx, (strategy_name, signal) in enumerate(ai_selections, start=1):
+                direction = signal.direction.replace("_", " ").title()
+                signal_id = f"{signal.symbol}_{strategy_name}"
+                ai_reason = ai_reasons.get(signal_id, "AI selected")
+                # Truncate reason if too long
+                if len(ai_reason) > 60:
+                    ai_reason = ai_reason[:57] + "..."
+                lines.append(
+                    f"| {idx} | {signal.symbol} | {direction} | "
+                    f"{strategy_name.replace('Strategy', '')} | {ai_reason} |"
+                )
+            lines.append("")
+
+        # Quantitative Picks section
+        if quant_picks:
+            lines.append("*-- Quantitative Top Picks --*")
+            lines.append("| # | Symbol | Direction | Strategy | Score | Reason |")
+            lines.append("|---|----------|-----------|------------------|-------|--------|")
+
+            for idx, score in enumerate(quant_picks, start=1):
+                direction = score.signal.direction.replace("_", " ").title()
+                reason_short = score.reason[:50] + "..." if len(score.reason) > 50 else score.reason
+                lines.append(
+                    f"| {idx} | {score.signal.symbol} | {direction} | "
+                    f"{score.strategy_name.replace('Strategy', '')} | "
+                    f"{score.composite_score:.2f} | {reason_short} |"
+                )
+
+        # Footer
+        if csv_path:
+            lines.append("")
+            lines.append(f"Full results: `{csv_path}`")
+
+        return "\n".join(lines)
+
     def _build_ranked_message(
         self,
         ranked_signals: List[SignalScore],
