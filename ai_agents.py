@@ -9,7 +9,11 @@ from typing import Iterable, List, Optional
 
 from loguru import logger
 
-from gemini_client import GeminiClient, GeminiClientError
+try:
+    from gemini_client_v2 import GeminiClientV2 as GeminiClient, GeminiClientError
+except ImportError:
+    from gemini_client import GeminiClient, GeminiClientError  # type: ignore
+
 from option_data import OptionChainSnapshot
 from strategies.base import TradeSignal
 

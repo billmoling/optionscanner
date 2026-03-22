@@ -21,6 +21,8 @@ from signal_ranking import SignalRanker, StrategyConfig, load_strategy_configs
 from stock_data import StockDataFetcher
 from technical_indicators import TechnicalIndicatorProcessor
 from market_state import DictMarketStateProvider, MarketStateClassifier, MarketStateResult
+from market_context import MarketContextProvider, MarketContextConfig
+from economic_calendar_ai import EconomicCalendarAIFetcher
 from scheduling import compute_next_run, parse_schedule_times
 from strategies.base import BaseOptionStrategy, TradeSignal
 from trade_history import TradeHistory
@@ -41,9 +43,38 @@ async def run_once(
     trade_executor: Optional[TradeExecutor] = None,
     config: Optional[Dict[str, Any]] = None,
 ) -> None:
+    """Run the option scanner once.
+
+    Args:
+        fetcher: Option data fetcher
+        strategies: List of trading strategies
+        symbols: Symbols to scan
+        results_dir: Directory for output files
+        selection_agent: Optional signal batch selector
+        slack_notifier: Optional Slack notifier
+        enable_gemini: Enable Gemini AI calls
+        stock_fetcher: Optional stock data fetcher
+        indicator_processor: Optional technical indicator processor
+        stock_history_kwargs: Kwargs for stock history fetch
+        trade_executor: Optional trade executor
+        config: Optional config dict
+    """
     loop = asyncio.get_running_loop()
     if trade_executor:
         trade_executor.set_event_loop(loop)
+
+    # Refresh economic calendar weekly via AI (non-blocking check)
+    try:
+        calendar_fetcher = EconomicCalendarAIFetcher()
+        if calendar_fetcher.should_refresh():
+            logger.info("Economic calendar refresh needed (7+ days since last update)")
+            # Run calendar refresh in background (non-blocking)
+            calendar_fetcher.refresh_calendar()
+        else:
+            logger.debug("Economic calendar is fresh")
+    except Exception as exc:
+        logger.warning("Failed to refresh economic calendar | error={error}", error=exc)
+
     symbol_list = list(symbols)
     underlying_context: Dict[str, Dict[str, Any]] = {}
     market_state_results: Dict[str, MarketStateResult] = {}
@@ -85,7 +116,23 @@ async def run_once(
     data_dir = Path(config.get("data_dir", "./data")) if config else Path("./data")
     trade_history = TradeHistory(data_dir / "trade_history.json")
     strategy_configs = load_strategy_configs(config) if config else {}
-    ranker = SignalRanker(trade_history, strategy_configs, top_k=5)
+
+    # Initialize market context provider
+    market_context_config = MarketContextConfig()
+    market_context = MarketContextProvider(config=market_context_config)
+    # Refresh market context with current state
+    market_context.refresh_context(
+        market_states={symbol: result.state for symbol, result in market_state_results.items()}
+        if market_state_results else None,
+        symbols=symbol_list,
+    )
+
+    ranker = SignalRanker(
+        trade_history=trade_history,
+        strategy_configs=strategy_configs,
+        top_k=5,
+        market_context=market_context,
+    )
 
     aggregated_signals: List[Tuple[str, TradeSignal]] = []
     for strategy in strategies:
@@ -130,7 +177,10 @@ async def run_once(
         if not ranked_signals:
             logger.info("No ranked signals to send to Slack")
         else:
-            await loop.run_in_executor(None, slack_notifier.send_ranked_signals, ranked_signals, file_path)
+            # Pass market context to Slack notifier for header
+            await loop.run_in_executor(
+                None, slack_notifier.send_ranked_signals, ranked_signals, file_path, market_context
+            )
 
     if trade_executor and finalist_payload:
         loop = asyncio.get_running_loop()

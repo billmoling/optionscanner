@@ -5,7 +5,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -14,6 +14,9 @@ import yaml
 from loguru import logger
 
 from signal_ranking import SignalScore
+
+if TYPE_CHECKING:
+    from market_context import MarketContextProvider
 
 
 PostCallable = Callable[[str, Dict[str, object]], None]
@@ -78,7 +81,12 @@ class SlackNotifier:
                     error=exc,
                 )
 
-    def send_ranked_signals(self, ranked_signals: List[SignalScore], csv_path: Optional[Path] = None) -> None:
+    def send_ranked_signals(
+        self,
+        ranked_signals: List[SignalScore],
+        csv_path: Optional[Path] = None,
+        market_context: Optional[MarketContextProvider] = None,
+    ) -> None:
         """Send top ranked signals as a formatted Slack message when enabled."""
         if not self.enabled:
             logger.debug("Slack notifications are disabled; skipping send.")
@@ -90,7 +98,7 @@ class SlackNotifier:
             logger.info("No ranked signals to send to Slack.")
             return
 
-        message = self._build_ranked_message(ranked_signals, csv_path)
+        message = self._build_ranked_message(ranked_signals, csv_path, market_context)
         payload = self._build_payload(message)
         try:
             self._post(self.settings.webhook_url, payload)
@@ -98,7 +106,12 @@ class SlackNotifier:
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.exception("Failed to send ranked signals to Slack | error={error}", error=exc)
 
-    def _build_ranked_message(self, ranked_signals: List[SignalScore], csv_path: Optional[Path]) -> str:
+    def _build_ranked_message(
+        self,
+        ranked_signals: List[SignalScore],
+        csv_path: Optional[Path] = None,
+        market_context: Optional[MarketContextProvider] = None,
+    ) -> str:
         """Build a formatted Slack message with ranked signals table."""
         from datetime import datetime, timezone
 
@@ -108,6 +121,14 @@ class SlackNotifier:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         lines.append(f"*{self.title}* | {timestamp}")
         lines.append("")
+
+        # Market context header (if available)
+        if market_context:
+            context_result = market_context.get_context()
+            if context_result:
+                context_lines = self._format_market_context(context_result)
+                lines.extend(context_lines)
+                lines.append("")
 
         # Table header
         lines.append("| # | Symbol | Direction | Strategy | Score | Reason |")
@@ -129,6 +150,74 @@ class SlackNotifier:
             lines.append(f"Full results: `{csv_path}`")
 
         return "\n".join(lines)
+
+    def _format_market_context(self, context) -> List[str]:
+        """Format market context result into Slack-friendly lines.
+
+        Args:
+            context: MarketContextResult from MarketContextProvider
+
+        Returns:
+            List of formatted lines for Slack message
+        """
+        lines: List[str] = []
+
+        # VIX line
+        if context.vix:
+            vix_emoji = {
+                "LOW": ":green_circle:",
+                "NORMAL": ":white_circle:",
+                "HIGH": ":orange_circle:",
+                "EXTREME": ":red_circle:",
+            }.get(context.vix.state, ":white_circle:")
+            lines.append(f"VIX: {context.vix.level:.1f} {vix_emoji} ({context.vix.state})")
+
+        # Market states
+        state_emoji = {
+            "bull": ":green_circle:",
+            "uptrend": ":large_blue_circle:",
+            "bear": ":red_circle:",
+        }
+
+        if context.spy_state:
+            emoji = state_emoji.get(context.spy_state.value, "")
+            lines.append(f"SPY: {context.spy_state.value.upper()} {emoji}")
+
+        if context.qqq_state:
+            emoji = state_emoji.get(context.qqq_state.value, "")
+            lines.append(f"QQQ: {context.qqq_state.value.upper()} {emoji}")
+
+        # Context score
+        score = context.context_score
+        if score >= 0.7:
+            score_emoji = ":green_circle:"
+        elif score >= 0.4:
+            score_emoji = ":yellow_circle:"
+        else:
+            score_emoji = ":red_circle:"
+        lines.append(f"Context Score: {score:.2f} {score_emoji}")
+
+        # Earnings watch
+        if context.earnings_map:
+            earnings_str = ", ".join(
+                f"{s}({d}d)" for s, d in sorted(context.earnings_map.items(), key=lambda x: x[1])[:5]
+            )
+            lines.append(f"Earnings: {earnings_str}")
+
+        # Economic events
+        if context.economic_events:
+            from datetime import date
+            events_str = ", ".join(
+                f"{e.event_type}({(e.date - date.today()).days}d)"
+                for e in context.economic_events[:3]
+            )
+            lines.append(f"Events: {events_str}")
+
+        # Warnings
+        if context.warnings:
+            lines.append(f":warning: {context.warnings[0]}")
+
+        return lines
 
     def _build_payload(self, message: str) -> Dict[str, object]:
         payload: Dict[str, object] = {"text": message}

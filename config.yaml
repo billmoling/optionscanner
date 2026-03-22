@@ -23,6 +23,19 @@ data_dir: "./data"
 enable_gemini: true
 gemini:
   model_name: "gemini-2.5-flash"
+market_context:
+  # VIX thresholds
+  vix_low_threshold: 15.0
+  vix_high_threshold: 25.0
+  vix_extreme_threshold: 35.0
+  # Earnings penalty
+  earnings_penalty_days: 5
+  earnings_penalty: 0.2
+  # Economic event penalty
+  economic_blackout_days: 2
+  economic_penalty: 0.15
+# FMP API key for earnings data (required for earnings monitoring)
+fmp_api_key: "${FMP_API_KEY}"
 reddit:
   enabled: false
   subreddits:
@@ -121,6 +134,21 @@ strategies:
       min_upvotes: 50
       max_positions: 3
     published_win_rate: 0.50
+  EarningsGambalStrategy:
+    params:
+      # Only generate signals 1-5 days before earnings
+      min_days_to_earnings: 1
+      max_days_to_earnings: 5
+      # Smaller position size due to higher risk
+      max_position_size: 0.5
+      # High delta for directional plays
+      target_delta: 0.40
+      # Minimum expected move to justify volatility play
+      min_expected_move: 0.05
+      # Equal weight to straddle and directional analysis
+      straddle_weight: 0.5
+      directional_weight: 0.5
+    published_win_rate: 0.45
 schedule:
   times:
     - "06:30"

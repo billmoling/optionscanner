@@ -5,9 +5,10 @@ loguru
 python-logging-loki
 asyncio
 pyyaml
-google-generativeai
+google-genai
 python-dotenv
 numpy
 pytest
 pyarrow
 praw
+requests

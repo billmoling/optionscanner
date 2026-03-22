@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from loguru import logger
 
 from strategies.base import TradeSignal
 from trade_history import TradeHistory, StrategyStats
+
+if TYPE_CHECKING:
+    from market_context import MarketContextProvider
 
 
 @dataclass(slots=True)
@@ -52,10 +55,16 @@ class SignalRanker:
 
     Composite score formula:
         score = (win_rate_w * win_rate_score) + (rr_w * rr_score) + (perf_w * perf_score)
+                - context_penalty
 
     Weights shift based on trade count per strategy:
         - < 30 trades: win_rate=0.5, rr=0.3, perf=0.2 (weighted toward published)
         - >= 30 trades: win_rate=0.2, rr=0.3, perf=0.5 (weighted toward live performance)
+
+    Context penalties:
+        - Pre-earnings symbols: -0.20
+        - Economic blackout period: -0.15
+        - High VIX (25-35): -0.15, Extreme VIX (>35): -0.30
     """
 
     def __init__(
@@ -63,10 +72,12 @@ class SignalRanker:
         trade_history: TradeHistory,
         strategy_configs: Dict[str, StrategyConfig],
         top_k: int = 5,
+        market_context: Optional[MarketContextProvider] = None,
     ) -> None:
         self._trade_history = trade_history
         self._strategy_configs = strategy_configs or {}
         self._top_k = top_k
+        self._market_context = market_context
 
         # Default weights
         self._weights_initial = {"win_rate": 0.5, "rr": 0.3, "perf": 0.2}
@@ -120,11 +131,15 @@ class SignalRanker:
         rr_score = self._compute_rr_score(signal)
         perf_score = self._compute_perf_score(stats)
 
-        # Composite score
+        # Compute context penalty
+        context_penalty = self._compute_context_penalty(signal.symbol)
+
+        # Composite score (with penalty)
         composite = (
             weights["win_rate"] * win_rate_score
             + weights["rr"] * rr_score
             + weights["perf"] * perf_score
+            - context_penalty
         )
 
         # Generate reason
@@ -136,6 +151,7 @@ class SignalRanker:
             rr_score,
             perf_score,
             trade_count,
+            context_penalty,
         )
 
         return SignalScore(
@@ -223,6 +239,26 @@ class SignalRanker:
 
         return 0.6 * win_rate_component + 0.4 * pnl_component
 
+    def _compute_context_penalty(self, symbol: str) -> float:
+        """Compute context penalty based on market conditions.
+
+        Penalties:
+        - Pre-earnings (within 5 days): -0.20
+        - Economic blackout period: -0.15
+        - High VIX (25-35): -0.15
+        - Extreme VIX (>35): -0.30
+
+        Args:
+            symbol: Symbol to check for earnings proximity
+
+        Returns:
+            Total penalty value (0-1) to subtract from composite score
+        """
+        if not self._market_context:
+            return 0.0
+
+        return self._market_context.get_penalty(symbol)
+
     def _generate_reason(
         self,
         strategy_name: str,
@@ -232,6 +268,7 @@ class SignalRanker:
         rr_score: float,
         perf_score: float,
         trade_count: int,
+        context_penalty: float = 0.0,
     ) -> str:
         """Generate human-readable ranking reason."""
         reasons: List[str] = []
@@ -265,6 +302,14 @@ class SignalRanker:
                 reasons.append(f"strong live perf ({stats.win_rate:.0%} win, ${stats.avg_pnl:.2f} avg)")
             elif perf_score >= 0.4:
                 reasons.append(f"stable live perf ({stats.win_rate:.0%} win)")
+
+        # Context penalties
+        if context_penalty >= 0.3:
+            reasons.append("HIGH RISK: extreme market conditions")
+        elif context_penalty >= 0.15:
+            reasons.append("elevated risk (market context)")
+        elif context_penalty > 0:
+            reasons.append("minor risk penalty")
 
         return "; ".join(reasons)
 
