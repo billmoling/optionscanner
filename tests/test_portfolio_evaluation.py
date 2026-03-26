@@ -4,7 +4,14 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from portfolio.evaluation import EvaluationResult, PositionGroup, Recommendation
+from portfolio.evaluation import (
+    EvaluationResult,
+    GrouperConfig,
+    PositionEvaluator,
+    PositionGroup,
+    PositionGrouper,
+    Recommendation,
+)
 
 
 class TestPositionGroup:
@@ -568,3 +575,351 @@ class TestRecommendation:
         assert Recommendation.ROLL.value == "ROLL"
         assert Recommendation.CLOSE_HALF.value == "CLOSE_HALF"
         assert Recommendation.ADJUST.value == "ADJUST"
+
+
+class TestPositionGrouper:
+    """Tests for PositionGrouper class."""
+
+    def test_grouper_groups_by_underlying_and_expiry(self):
+        """Legs with same underlying and expiry should be grouped."""
+        positions = pd.DataFrame(
+            [
+                {
+                    "underlying": "AAPL",
+                    "symbol": "AAPL260327C00150000",
+                    "expiry": "2026-03-27",
+                    "right": "C",
+                    "strike": 150.0,
+                    "quantity": -1.0,
+                    "avg_price": 5.0,
+                    "market_price": 3.0,
+                    "sec_type": "OPT",
+                    "strategy": None,
+                    "multiplier": 100.0,
+                },
+                {
+                    "underlying": "AAPL",
+                    "symbol": "AAPL260327C00155000",
+                    "expiry": "2026-03-27",
+                    "right": "C",
+                    "strike": 155.0,
+                    "quantity": 1.0,
+                    "avg_price": 2.0,
+                    "market_price": 1.5,
+                    "sec_type": "OPT",
+                    "strategy": None,
+                    "multiplier": 100.0,
+                },
+                {
+                    "underlying": "AAPL",
+                    "symbol": "AAPL260327P00145000",
+                    "expiry": "2026-03-27",
+                    "right": "P",
+                    "strike": 145.0,
+                    "quantity": -1.0,
+                    "avg_price": 3.0,
+                    "market_price": 2.0,
+                    "sec_type": "OPT",
+                    "strategy": None,
+                    "multiplier": 100.0,
+                },
+            ]
+        )
+        grouper = PositionGrouper()
+        groups = grouper.group(positions)
+        assert len(groups) == 1  # All AAPL same expiry should be one group
+        assert groups[0].underlying == "AAPL"
+        assert len(groups[0].legs) == 3
+
+    def test_grouper_separates_different_underlyings(self):
+        """Positions in different underlyings should be separate groups."""
+        positions = pd.DataFrame(
+            [
+                {
+                    "underlying": "AAPL",
+                    "symbol": "AAPL260327C00150000",
+                    "expiry": "2026-03-27",
+                    "right": "C",
+                    "strike": 150.0,
+                    "quantity": -1.0,
+                    "avg_price": 5.0,
+                    "market_price": 3.0,
+                    "sec_type": "OPT",
+                    "strategy": None,
+                    "multiplier": 100.0,
+                },
+                {
+                    "underlying": "TSLA",
+                    "symbol": "TSLA260327C00200000",
+                    "expiry": "2026-03-27",
+                    "right": "C",
+                    "strike": 200.0,
+                    "quantity": -1.0,
+                    "avg_price": 10.0,
+                    "market_price": 8.0,
+                    "sec_type": "OPT",
+                    "strategy": None,
+                    "multiplier": 100.0,
+                },
+            ]
+        )
+        grouper = PositionGrouper()
+        groups = grouper.group(positions)
+        assert len(groups) == 2
+
+    def test_grouper_with_strategy_column(self):
+        """Grouper should use strategy column when available."""
+        positions = pd.DataFrame(
+            [
+                {
+                    "underlying": "AAPL",
+                    "symbol": "AAPL260327C00150000",
+                    "expiry": "2026-03-27",
+                    "right": "C",
+                    "strike": 150.0,
+                    "quantity": -1.0,
+                    "avg_price": 5.0,
+                    "market_price": 3.0,
+                    "sec_type": "OPT",
+                    "strategy": "PutCreditSpread",
+                    "multiplier": 100.0,
+                },
+                {
+                    "underlying": "AAPL",
+                    "symbol": "AAPL260327C00155000",
+                    "expiry": "2026-03-27",
+                    "right": "C",
+                    "strike": 155.0,
+                    "quantity": 1.0,
+                    "avg_price": 2.0,
+                    "market_price": 1.5,
+                    "sec_type": "OPT",
+                    "strategy": "PutCreditSpread",
+                    "multiplier": 100.0,
+                },
+                {
+                    "underlying": "AAPL",
+                    "symbol": "AAPL260417C00160000",
+                    "expiry": "2026-04-17",
+                    "right": "C",
+                    "strike": 160.0,
+                    "quantity": -1.0,
+                    "avg_price": 4.0,
+                    "market_price": 3.5,
+                    "sec_type": "OPT",
+                    "strategy": "CoveredCall",
+                    "multiplier": 100.0,
+                },
+            ]
+        )
+        grouper = PositionGrouper(config=GrouperConfig(group_by_strategy_column=True))
+        groups = grouper.group(positions)
+        # Should have 2 groups: one for PutCreditSpread, one for CoveredCall
+        assert len(groups) == 2
+
+    def test_grouper_empty_positions(self):
+        """Grouper should handle empty dataframe."""
+        positions = pd.DataFrame()
+        grouper = PositionGrouper()
+        groups = grouper.group(positions)
+        assert len(groups) == 0
+
+    def test_grouper_config_defaults(self):
+        """GrouperConfig should have correct defaults."""
+        config = GrouperConfig()
+        assert config.group_by_strategy_column is True
+        assert config.max_days_expiry_difference == 2
+        assert config.prefer_fewer_groups is True
+
+
+class TestPositionEvaluator:
+    """Tests for PositionEvaluator class."""
+
+    def test_evaluator_hold_recommendation(self):
+        """Hold when no rules triggered."""
+        group = PositionGroup.from_legs(
+            [
+                pd.Series(
+                    {
+                        "underlying": "AAPL",
+                        "expiry": "2026-04-17",
+                        "right": "C",
+                        "strike": 150.0,
+                        "quantity": -1.0,
+                        "avg_price": 5.0,
+                        "market_price": 4.0,
+                        "sec_type": "OPT",
+                        "multiplier": 100.0,
+                        "delta": -0.3,
+                        "gamma": 0.02,
+                        "theta": 0.1,
+                        "vega": 5.0,
+                    }
+                ),
+            ],
+            group_id="test",
+        )
+        evaluator = PositionEvaluator()
+        results = evaluator.evaluate([group])
+        assert len(results) == 1
+        assert results[0].recommendation == Recommendation.HOLD
+
+    def test_evaluator_sell_profit_target(self):
+        """Sell when profit target reached (80%+)."""
+        # Credit spread: sold at 5.0, now worth 1.0 = 80% profit
+        group = PositionGroup.from_legs(
+            [
+                pd.Series(
+                    {
+                        "underlying": "AAPL",
+                        "expiry": "2026-04-17",
+                        "right": "C",
+                        "strike": 150.0,
+                        "quantity": -1.0,
+                        "avg_price": 5.0,
+                        "market_price": 1.0,
+                        "sec_type": "OPT",
+                        "multiplier": 100.0,
+                        "delta": -0.1,
+                        "gamma": 0.01,
+                        "theta": 0.05,
+                        "vega": 2.0,
+                    }
+                ),
+            ],
+            group_id="test",
+        )
+        evaluator = PositionEvaluator()
+        results = evaluator.evaluate([group])
+        assert len(results) == 1
+        assert results[0].recommendation == Recommendation.SELL
+
+    def test_evaluator_stop_loss(self):
+        """Stop loss when loss exceeds 200%."""
+        # Credit position: sold at 5.0, now worth 15.0 (loss on short)
+        # PnL = (5 - 15) * -1 * 100 = -1000 (loss)
+        # PnL% = -1000 / 500 = -2.0 = -200%
+        group = PositionGroup.from_legs(
+            [
+                pd.Series(
+                    {
+                        "underlying": "AAPL",
+                        "expiry": "2026-04-17",
+                        "right": "C",
+                        "strike": 150.0,
+                        "quantity": -1.0,
+                        "avg_price": 5.0,
+                        "market_price": 15.0,
+                        "sec_type": "OPT",
+                        "multiplier": 100.0,
+                        "delta": -0.5,
+                        "gamma": 0.02,
+                        "theta": 0.1,
+                        "vega": 5.0,
+                    }
+                ),
+            ],
+            group_id="test",
+        )
+        evaluator = PositionEvaluator()
+        results = evaluator.evaluate([group])
+        assert len(results) == 1
+        assert results[0].recommendation == Recommendation.SELL
+
+    def test_evaluator_roll_near_expiry(self):
+        """Roll when short option near expiry (<14 DTE)."""
+        from datetime import date, timedelta
+
+        # Position expiring in 10 days with short call
+        expiry_date = date.today() + timedelta(days=10)
+        expiry_str = expiry_date.strftime("%Y-%m-%d")
+
+        group = PositionGroup.from_legs(
+            [
+                pd.Series(
+                    {
+                        "underlying": "AAPL",
+                        "expiry": expiry_str,
+                        "right": "C",
+                        "strike": 150.0,
+                        "quantity": -1.0,
+                        "avg_price": 5.0,
+                        "market_price": 4.0,
+                        "sec_type": "OPT",
+                        "multiplier": 100.0,
+                        "delta": -0.3,
+                        "gamma": 0.02,
+                        "theta": 0.1,
+                        "vega": 5.0,
+                    }
+                ),
+            ],
+            group_id="test",
+        )
+        evaluator = PositionEvaluator()
+        results = evaluator.evaluate([group])
+        assert len(results) == 1
+        assert results[0].recommendation == Recommendation.ROLL
+
+    def test_evaluator_result_contains_rationale(self):
+        """Evaluation result should contain rationale."""
+        group = PositionGroup.from_legs(
+            [
+                pd.Series(
+                    {
+                        "underlying": "AAPL",
+                        "expiry": "2026-04-17",
+                        "right": "C",
+                        "strike": 150.0,
+                        "quantity": -1.0,
+                        "avg_price": 5.0,
+                        "market_price": 1.0,
+                        "sec_type": "OPT",
+                        "multiplier": 100.0,
+                        "delta": -0.1,
+                        "gamma": 0.01,
+                        "theta": 0.05,
+                        "vega": 2.0,
+                    }
+                ),
+            ],
+            group_id="test",
+        )
+        evaluator = PositionEvaluator()
+        results = evaluator.evaluate([group])
+        assert len(results) == 1
+        assert results[0].rationale
+        assert "profit" in results[0].rationale.lower()
+
+    def test_evaluator_config_custom_thresholds(self):
+        """Evaluator should accept custom thresholds."""
+        group = PositionGroup.from_legs(
+            [
+                pd.Series(
+                    {
+                        "underlying": "AAPL",
+                        "expiry": "2026-04-17",
+                        "right": "C",
+                        "strike": 150.0,
+                        "quantity": -1.0,
+                        "avg_price": 5.0,
+                        "market_price": 4.0,
+                        "sec_type": "OPT",
+                        "multiplier": 100.0,
+                        "delta": -0.3,
+                        "gamma": 0.02,
+                        "theta": 0.1,
+                        "vega": 5.0,
+                    }
+                ),
+            ],
+            group_id="test",
+        )
+        # Custom config with 20% take profit
+        evaluator = PositionEvaluator(
+            config={"take_profit_pct": 0.2, "stop_loss_pct": 2.0}
+        )
+        results = evaluator.evaluate([group])
+        assert len(results) == 1
+        # 20% profit should trigger sell with 20% threshold
+        assert results[0].recommendation == Recommendation.SELL

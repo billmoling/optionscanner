@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from loguru import logger
+
+
+@dataclass(slots=True)
+class GrouperConfig:
+    """Configuration for position grouping logic."""
+
+    group_by_strategy_column: bool = True  # Use strategy column if available
+    max_days_expiry_difference: int = 2  # Max DTE difference to consider same group
+    prefer_fewer_groups: bool = True  # Merge when ambiguous
 
 
 class Recommendation(str, Enum):
@@ -382,4 +391,406 @@ class EvaluationResult:
         }
 
 
-__all__ = ["Recommendation", "PositionGroup", "EvaluationResult"]
+__all__ = [
+    "Recommendation",
+    "PositionGroup",
+    "EvaluationResult",
+    "GrouperConfig",
+    "PositionGrouper",
+    "PositionEvaluator",
+]
+
+
+class PositionGrouper:
+    """
+    Groups individual option legs into strategic positions.
+
+    Grouping logic:
+    1. If strategy column is populated, use it
+    2. Otherwise, group by underlying + expiry proximity
+    3. Detect spread/condor patterns from leg characteristics
+    """
+
+    def __init__(self, config: Optional[GrouperConfig] = None) -> None:
+        self._config = config or GrouperConfig()
+
+    def group(self, positions: pd.DataFrame) -> List[PositionGroup]:
+        """Group individual position legs into strategic positions.
+
+        Args:
+            positions: DataFrame with position legs
+
+        Returns:
+            List of PositionGroup objects
+        """
+        if positions.empty:
+            return []
+
+        # Filter to options only
+        if "sec_type" in positions.columns:
+            options = positions[positions["sec_type"] == "OPT"].copy()
+        else:
+            options = positions.copy()
+
+        if options.empty:
+            return []
+
+        logger.debug(
+            "Grouping {count} option positions",
+            count=len(options),
+        )
+
+        # Create initial groups based on configuration
+        if self._config.group_by_strategy_column and "strategy" in options.columns:
+            raw_groups = self._group_by_strategy_column(options)
+        else:
+            raw_groups = self._group_by_underlying_expiry(options)
+
+        # Build PositionGroup objects
+        groups: List[PositionGroup] = []
+        for group_id, legs in raw_groups.items():
+            try:
+                position_group = PositionGroup.from_legs(legs, group_id=group_id)
+                groups.append(position_group)
+            except Exception as e:
+                logger.warning(
+                    "Failed to create position group {group_id}: {error}",
+                    group_id=group_id,
+                    error=e,
+                )
+
+        logger.info(
+            "Created {count} position groups",
+            count=len(groups),
+        )
+        return groups
+
+    def _create_raw_groups(
+        self, positions: pd.DataFrame
+    ) -> Dict[str, List[pd.Series]]:
+        """Create initial grouping based on metadata.
+
+        Args:
+            positions: DataFrame with position legs
+
+        Returns:
+            Dict mapping group_id to list of leg Series
+        """
+        if self._config.group_by_strategy_column and "strategy" in positions.columns:
+            return self._group_by_strategy_column(positions)
+        return self._group_by_underlying_expiry(positions)
+
+    def _group_by_strategy_column(
+        self, positions: pd.DataFrame
+    ) -> Dict[str, List[pd.Series]]:
+        """Group positions using strategy column.
+
+        Args:
+            positions: DataFrame with position legs
+
+        Returns:
+            Dict mapping group_id to list of leg Series
+        """
+        groups: Dict[str, List[pd.Series]] = {}
+
+        # Group by strategy + underlying + expiry proximity
+        for (strategy, underlying), group in positions.groupby(
+            ["strategy", "underlying"]
+        ):
+            if strategy in (None, "", "nan", float("nan")):
+                # Fall back to underlying + expiry grouping
+                continue
+
+            # Further subdivide by expiry
+            expiry_groups = self._subdivide_by_expiry(
+                group, f"{strategy}_{underlying}"
+            )
+            groups.update(expiry_groups)
+
+        # Handle positions without strategy
+        no_strategy = positions[
+            positions["strategy"].isin([None, "", "nan"])
+            | positions["strategy"].isna()
+        ]
+        if not no_strategy.empty:
+            expiry_groups = self._group_by_underlying_expiry(no_strategy)
+            groups.update(expiry_groups)
+
+        return groups
+
+    def _group_by_underlying_expiry(
+        self, positions: pd.DataFrame
+    ) -> Dict[str, List[pd.Series]]:
+        """Default grouping by underlying + expiry.
+
+        Args:
+            positions: DataFrame with position legs
+
+        Returns:
+            Dict mapping group_id to list of leg Series
+        """
+        groups: Dict[str, List[pd.Series]] = {}
+
+        for underlying, group in positions.groupby("underlying"):
+            expiry_groups = self._subdivide_by_expiry(group, underlying)
+            groups.update(expiry_groups)
+
+        return groups
+
+    def _subdivide_by_expiry(
+        self, group: pd.DataFrame, base_id: str
+    ) -> Dict[str, List[pd.Series]]:
+        """Subdivide a group by expiry proximity.
+
+        Args:
+            group: DataFrame subset for a single underlying
+            base_id: Base identifier for group IDs
+
+        Returns:
+            Dict mapping group_id to list of leg Series
+        """
+        if group.empty:
+            return {}
+
+        # Parse expiry dates
+        expiries = []
+        for _, row in group.iterrows():
+            expiry_str = str(row.get("expiry", ""))
+            if expiry_str:
+                try:
+                    expiry_date = self._parse_expiry(expiry_str)
+                    expiries.append(expiry_date)
+                except (ValueError, TypeError):
+                    expiries.append(None)
+            else:
+                expiries.append(None)
+
+        group = group.copy()
+        group["_expiry_date"] = expiries
+
+        # Cluster by expiry proximity
+        expiry_clusters: Dict[date, List[int]] = {}
+        for idx, expiry_date in enumerate(expiries):
+            if expiry_date is None:
+                continue
+
+            # Find existing cluster within max_days_expiry_difference
+            found_cluster = None
+            for cluster_date in expiry_clusters.keys():
+                if abs((expiry_date - cluster_date).days) <= self._config.max_days_expiry_difference:
+                    found_cluster = cluster_date
+                    break
+
+            if found_cluster is not None:
+                expiry_clusters[found_cluster].append(idx)
+            else:
+                expiry_clusters[expiry_date] = [idx]
+
+        # Build groups
+        groups: Dict[str, List[pd.Series]] = {}
+        for cluster_date, indices in expiry_clusters.items():
+            cluster_rows = group.iloc[indices]
+            group_id = f"{base_id}_{cluster_date.strftime('%Y%m%d')}"
+            groups[group_id] = [
+                cluster_rows.iloc[i].drop("_expiry_date") for i in range(len(cluster_rows))
+            ]
+
+        return groups
+
+    @staticmethod
+    def _parse_expiry(expiry_str: str) -> date:
+        """Parse an expiry string to a date object.
+
+        Args:
+            expiry_str: Expiry string in YYYY-MM-DD or YYYYMMDD format
+
+        Returns:
+            date object
+        """
+        if "-" in expiry_str:
+            return datetime.strptime(expiry_str, "%Y-%m-%d").date()
+        if len(expiry_str) == 8 and expiry_str.isdigit():
+            return datetime.strptime(expiry_str, "%Y%m%d").date()
+        try:
+            ts = pd.Timestamp(expiry_str)
+            return ts.to_pydatetime().date()
+        except Exception:
+            raise ValueError(f"Unable to parse expiry: {expiry_str}")
+
+
+class PositionEvaluator:
+    """
+    Evaluates grouped positions and generates recommendations.
+
+    Evaluation criteria:
+    - PnL thresholds (take profit, stop loss)
+    - DTE thresholds (roll windows)
+    - Delta/risk thresholds
+    - Strategy-specific rules
+    """
+
+    def __init__(self, config: Optional[dict] = None) -> None:
+        self._config = config or {}
+        self._default_rules = {
+            "take_profit_pct": self._config.get("take_profit_pct", 0.5),
+            "stop_loss_pct": self._config.get("stop_loss_pct", 2.0),
+            "roll_dte_min": self._config.get("roll_dte_min", 14),
+            "roll_dte_target": self._config.get("roll_dte_target", 30),
+            "close_winner_dte": self._config.get("close_winner_dte", 7),
+        }
+
+    def evaluate(self, groups: List[PositionGroup]) -> List[EvaluationResult]:
+        """Evaluate all position groups and return recommendations.
+
+        Args:
+            groups: List of PositionGroup objects to evaluate
+
+        Returns:
+            List of EvaluationResult objects
+        """
+        results: List[EvaluationResult] = []
+
+        for group in groups:
+            result = self._evaluate_group(group)
+            results.append(result)
+
+        logger.info(
+            "Evaluated {count} position groups",
+            count=len(results),
+        )
+        return results
+
+    def _evaluate_group(self, group: PositionGroup) -> EvaluationResult:
+        """Evaluate a single position group.
+
+        Args:
+            group: PositionGroup to evaluate
+
+        Returns:
+            EvaluationResult with recommendation
+        """
+        days_to_expiry = group.days_to_expiry()
+        pnl_pct = group.pnl_pct
+        is_credit = group.is_credit_position()
+
+        recommendation, confidence, rationale, suggested_action = self._apply_rules(
+            group, days_to_expiry, pnl_pct, is_credit
+        )
+
+        logger.debug(
+            "Evaluated group {group_id}: {recommendation} ({rationale})",
+            group_id=group.group_id,
+            recommendation=recommendation.value,
+            rationale=rationale,
+        )
+
+        return EvaluationResult(
+            group_id=group.group_id,
+            underlying=group.underlying,
+            strategy_type=group.strategy_type,
+            recommendation=recommendation,
+            confidence=confidence,
+            rationale=rationale,
+            suggested_action=suggested_action,
+            pnl_pct=pnl_pct,
+            days_to_expiry=days_to_expiry,
+            net_delta=group.net_delta,
+        )
+
+    def _apply_rules(
+        self, group: PositionGroup, days_to_expiry: int, pnl_pct: float, is_credit: bool
+    ) -> tuple[Recommendation, float, str, str]:
+        """Apply evaluation rules and return recommendation.
+
+        Args:
+            group: PositionGroup to evaluate
+            days_to_expiry: Days until nearest expiry
+            pnl_pct: PnL percentage (positive = profit)
+            is_credit: True if this is a credit position
+
+        Returns:
+            Tuple of (recommendation, confidence, rationale, suggested_action)
+        """
+        take_profit_pct = self._default_rules["take_profit_pct"]
+        stop_loss_pct = self._default_rules["stop_loss_pct"]
+        roll_dte_min = self._default_rules["roll_dte_min"]
+        close_winner_dte = self._default_rules["close_winner_dte"]
+
+        # Rule 1: Take profit on credit spreads (50%+ profit, or 80% max profit)
+        if is_credit and pnl_pct >= take_profit_pct:
+            confidence = min(1.0, 0.7 + (pnl_pct - take_profit_pct) * 0.3)
+            if pnl_pct >= 0.8:
+                rationale = f"Max profit reached ({pnl_pct:.0%} gain)"
+                confidence = 0.95
+            else:
+                rationale = f"Profit target reached ({pnl_pct:.0%} gain)"
+            if days_to_expiry <= close_winner_dte:
+                return (
+                    Recommendation.SELL,
+                    confidence,
+                    rationale,
+                    f"Close {group.strategy_type} position at {pnl_pct:.0%} profit",
+                )
+            return (
+                Recommendation.SELL,
+                confidence,
+                rationale,
+                f"Close {group.strategy_type} position at {pnl_pct:.0%} profit",
+            )
+
+        # Rule 2: Stop loss (200%+ loss)
+        if pnl_pct <= -stop_loss_pct:
+            return (
+                Recommendation.SELL,
+                0.85,
+                f"Stop loss triggered ({pnl_pct:.0%} loss)",
+                f"Close {group.strategy_type} to limit losses",
+            )
+
+        # Rule 3: Roll short options near expiry (<14 DTE)
+        if days_to_expiry > 0 and days_to_expiry <= roll_dte_min:
+            # Check if there are short options
+            has_short = any(
+                float(leg.get("quantity", 0) or 0) < 0 for leg in group.legs
+            )
+            if has_short:
+                if pnl_pct >= take_profit_pct:
+                    # Profitable position near expiry - close it
+                    return (
+                        Recommendation.SELL,
+                        0.9,
+                        f"Close profitable position near expiry ({pnl_pct:.0%} gain, {days_to_expiry} DTE)",
+                        f"Close {group.strategy_type} at {pnl_pct:.0%} profit before expiry",
+                    )
+                else:
+                    # Not profitable, roll it
+                    return (
+                        Recommendation.ROLL,
+                        0.75,
+                        f"Roll short options ({days_to_expiry} DTE remaining)",
+                        f"Roll {group.strategy_type} to {self._default_rules['roll_dte_target']}DTE",
+                    )
+
+        # Rule 4: Close profitable positions near expiry (<7 DTE)
+        if days_to_expiry > 0 and days_to_expiry <= close_winner_dte:
+            if pnl_pct >= 0.3:  # At least 30% profit
+                return (
+                    Recommendation.SELL,
+                    0.85,
+                    f"Close profitable position near expiry ({pnl_pct:.0%} gain, {days_to_expiry} DTE)",
+                    f"Close {group.strategy_type} at {pnl_pct:.0%} profit before expiry",
+                )
+
+        # Rule 5: Hold if no rules triggered
+        rationale = "Position within acceptable parameters"
+        if pnl_pct > 0:
+            rationale = f"Position profitable ({pnl_pct:.0%} gain), maintain"
+        elif pnl_pct < 0:
+            rationale = f"Position underwater ({pnl_pct:.0%} loss), monitor"
+
+        return (
+            Recommendation.HOLD,
+            0.6,
+            rationale,
+            "Maintain current position",
+        )
