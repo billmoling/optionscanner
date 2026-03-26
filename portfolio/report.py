@@ -60,7 +60,22 @@ class PortfolioReporter:
         lines.extend(actions_lines)
         return "\n".join(lines)
 
-    def write_outputs(self, positions: pd.DataFrame, greek_summary: pd.DataFrame) -> (Path, Path, str):
+    def write_outputs(
+        self,
+        positions: pd.DataFrame,
+        greek_summary: pd.DataFrame,
+        evaluations: Optional[List[EvaluationResult]] = None,
+    ) -> tuple[Path, Path, str]:
+        """Write portfolio summary outputs to CSV.
+
+        Args:
+            positions: DataFrame of portfolio positions
+            greek_summary: DataFrame of greek summary per symbol
+            evaluations: Optional list of EvaluationResult to include
+
+        Returns:
+            Tuple of (csv_path, json_path, timestamp)
+        """
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         csv_path = self._results_dir / f"portfolio_summary_{timestamp}.csv"
 
@@ -68,7 +83,15 @@ class PortfolioReporter:
             positions.to_csv(fh, index=False)
             fh.write("\n")
             greek_summary.to_csv(fh, index=False)
+            if evaluations:
+                fh.write("\n")
+                eval_df = pd.DataFrame([e.to_dict() for e in evaluations])
+                eval_df.to_csv(fh, index=False)
         logger.info("Wrote portfolio summary CSV to {path}", path=str(csv_path))
+
+        # Also write separate evaluation CSV if evaluations provided
+        if evaluations:
+            self.write_evaluation_results(evaluations, timestamp)
 
         return csv_path, None, timestamp
 

@@ -241,7 +241,7 @@ class PortfolioManager:
         json_path = None
         try:
             csv_path, _json_unused, timestamp = self._reporter.write_outputs(
-                self.positions, self.greek_summary.per_symbol
+                self.positions, self.greek_summary.per_symbol, self.evaluations
             )
             logger.info(
                 "Portfolio outputs written | csv={path}",

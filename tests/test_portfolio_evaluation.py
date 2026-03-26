@@ -1006,3 +1006,150 @@ class TestRollRecommender:
 
         assert roll_rec.should_roll is True
         assert roll_rec.adjustment_type is not None
+
+
+class TestEvaluationResultFormatting:
+    """Tests for evaluation result formatting for messages and CSV output."""
+
+    def test_evaluation_result_to_dict(self):
+        """to_dict() should convert EvaluationResult to dictionary for CSV."""
+        result = EvaluationResult(
+            group_id="test_1",
+            underlying="AAPL",
+            strategy_type="vertical_spread",
+            recommendation=Recommendation.SELL,
+            confidence=0.8,
+            rationale="Profit target reached",
+            suggested_action="Close AAPL for 80% profit",
+            pnl_pct=80.0,
+            days_to_expiry=15,
+            net_delta=-0.2,
+        )
+        result_dict = result.to_dict()
+        assert result_dict["group_id"] == "test_1"
+        assert result_dict["underlying"] == "AAPL"
+        assert result_dict["strategy_type"] == "vertical_spread"
+        assert result_dict["recommendation"] == "SELL"
+        assert result_dict["confidence"] == 0.8
+        assert result_dict["rationale"] == "Profit target reached"
+        assert result_dict["suggested_action"] == "Close AAPL for 80% profit"
+        assert result_dict["pnl_pct"] == 80.0
+        assert result_dict["days_to_expiry"] == 15
+        assert result_dict["net_delta"] == -0.2
+
+    def test_reporter_write_outputs_with_evaluations(self):
+        """write_outputs() should optionally include evaluations in CSV."""
+        import tempfile
+        from pathlib import Path
+        from portfolio.report import PortfolioReporter, ReporterConfig
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ReporterConfig(
+                results_dir=Path(tmpdir),
+                logs_dir=Path(tmpdir),
+            )
+            reporter = PortfolioReporter(config)
+
+            # Create sample data
+            positions = pd.DataFrame([
+                {"symbol": "AAPL", "quantity": 100, "market_price": 150.0},
+            ])
+            greek_summary = pd.DataFrame([
+                {"underlying": "AAPL", "delta": -0.3, "gamma": 0.02},
+            ])
+            evaluations = [
+                EvaluationResult(
+                    group_id="test_1",
+                    underlying="AAPL",
+                    strategy_type="vertical_spread",
+                    recommendation=Recommendation.SELL,
+                    confidence=0.8,
+                    rationale="Profit target reached",
+                    suggested_action="Close position",
+                    pnl_pct=50.0,
+                    days_to_expiry=15,
+                    net_delta=-0.25,
+                ),
+            ]
+
+            # Call write_outputs with evaluations
+            csv_path, json_path, timestamp = reporter.write_outputs(
+                positions, greek_summary, evaluations
+            )
+
+            # Verify main CSV exists
+            assert csv_path.exists()
+            assert "portfolio_summary" in csv_path.name
+
+            # Verify evaluation CSV also created
+            eval_csv_path = reporter._results_dir / f"position_evaluations_{timestamp}.csv"
+            assert eval_csv_path.exists()
+
+            # Verify main CSV contains evaluation data
+            content = csv_path.read_text()
+            assert "AAPL" in content
+            assert "vertical_spread" in content
+            assert "SELL" in content
+
+    def test_manager_format_evaluations_for_message(self):
+        """PortfolioManager should format evaluations for messages."""
+        import tempfile
+        from unittest.mock import Mock
+        from pathlib import Path
+        from portfolio.manager import PortfolioManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ib_mock = Mock()
+            # Mock config to use temp directory
+            import yaml
+            config_path = Path(tmpdir) / "risk.yaml"
+            config_path.write_text(yaml.dump({
+                "limits": {},
+                "roll_rules": {},
+                "results_dir": tmpdir,
+                "logs_dir": tmpdir,
+            }))
+
+            manager = PortfolioManager(ib=ib_mock, config_path=str(config_path))
+
+            # Test the formatting
+            evaluations = [
+                EvaluationResult(
+                    group_id="test_1",
+                    underlying="AAPL",
+                    strategy_type="vertical_spread",
+                    recommendation=Recommendation.SELL,
+                    confidence=0.8,
+                    rationale="Profit target reached",
+                    suggested_action="Close for profit",
+                    pnl_pct=80.0,
+                    days_to_expiry=15,
+                    net_delta=-0.2,
+                ),
+                EvaluationResult(
+                    group_id="test_2",
+                    underlying="TSLA",
+                    strategy_type="single_leg",
+                    recommendation=Recommendation.HOLD,
+                    confidence=0.6,
+                    rationale="No triggers",
+                    suggested_action="Maintain position",
+                    pnl_pct=10.0,
+                    days_to_expiry=30,
+                    net_delta=-0.15,
+                ),
+            ]
+
+            # Verify _format_evaluations works
+            lines = manager._format_evaluations(evaluations)
+
+            assert isinstance(lines, list)
+            assert len(lines) >= 2
+            # Should contain underlying symbols
+            assert any("AAPL" in line for line in lines)
+            assert any("TSLA" in line for line in lines)
+            # TSLA (0.8 confidence) should appear before AAPL (0.6 confidence)
+            # Actually AAPL has 0.8, TSLA has 0.6, so AAPL first
+            aapl_line = next(i for i, line in enumerate(lines) if "AAPL" in line)
+            tsla_line = next(i for i, line in enumerate(lines) if "TSLA" in line)
+            assert aapl_line < tsla_line  # AAPL (higher confidence) first
