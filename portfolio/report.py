@@ -14,6 +14,7 @@ from gemini_client import GeminiClient, GeminiClientError
 from notifications import SlackNotifier
 
 from .rules import RiskBreach
+from .evaluation import EvaluationResult
 
 
 @dataclass(slots=True)
@@ -70,6 +71,19 @@ class PortfolioReporter:
         logger.info("Wrote portfolio summary CSV to {path}", path=str(csv_path))
 
         return csv_path, None, timestamp
+
+    def write_evaluation_results(
+        self, evaluations: Iterable[EvaluationResult], timestamp: str
+    ) -> Path:
+        """Write evaluation results to CSV."""
+        csv_path = self._results_dir / f"position_evaluations_{timestamp}.csv"
+
+        rows = [eval.to_dict() for eval in evaluations]
+        df = pd.DataFrame(rows)
+        df.to_csv(csv_path, index=False)
+
+        logger.info("Wrote position evaluations to {path}", path=str(csv_path))
+        return csv_path
 
     def log_details(self, message: str) -> Path:
         path = self._logs_dir / "portfolio_manager.log"
