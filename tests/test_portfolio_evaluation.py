@@ -11,6 +11,8 @@ from portfolio.evaluation import (
     PositionGroup,
     PositionGrouper,
     Recommendation,
+    RollRecommendation,
+    RollRecommender,
 )
 
 
@@ -923,3 +925,84 @@ class TestPositionEvaluator:
         assert len(results) == 1
         # 20% profit should trigger sell with 20% threshold
         assert results[0].recommendation == Recommendation.SELL
+
+
+class TestRollRecommender:
+    """Tests for RollRecommender class."""
+
+    def test_roll_recommender_near_expiry(self):
+        """Roll recommendation when near expiry."""
+        from datetime import date, timedelta
+
+        # Create a position expiring in 5 days
+        future_expiry = date.today() + timedelta(days=5)
+        group = PositionGroup.from_legs([
+            pd.Series({
+                "underlying": "AAPL", "expiry": future_expiry.isoformat(), "right": "C",
+                "strike": 150.0, "quantity": -1.0, "avg_price": 5.0,
+                "market_price": 3.0, "sec_type": "OPT", "multiplier": 100.0,
+                "delta": -0.4,
+            }),
+        ], group_id="test")
+
+        recommender = RollRecommender()
+        roll_rec = recommender.recommend_roll(group, current_dte=5)
+
+        assert roll_rec.should_roll is True
+        assert roll_rec.target_dte == 30  # Default target
+        assert "expiry" in roll_rec.rationale.lower()
+
+    def test_roll_recommender_elevated_delta(self):
+        """Roll recommendation when short delta is elevated."""
+        group = PositionGroup.from_legs([
+            pd.Series({
+                "underlying": "AAPL", "expiry": "2026-04-17", "right": "C",
+                "strike": 150.0, "quantity": -1.0, "avg_price": 5.0,
+                "market_price": 8.0, "sec_type": "OPT", "multiplier": 100.0,
+                "delta": -0.55,  # Elevated delta
+            }),
+        ], group_id="test")
+
+        recommender = RollRecommender()
+        roll_rec = recommender.recommend_roll(group, current_dte=23)
+
+        assert roll_rec.should_roll is True
+        assert "delta" in roll_rec.rationale.lower()
+
+    def test_roll_recommender_no_roll_needed(self):
+        """No roll recommendation when position is fine."""
+        group = PositionGroup.from_legs([
+            pd.Series({
+                "underlying": "AAPL", "expiry": "2026-04-17", "right": "C",
+                "strike": 150.0, "quantity": -1.0, "avg_price": 5.0,
+                "market_price": 4.0, "sec_type": "OPT", "multiplier": 100.0,
+                "delta": -0.2,  # Low delta
+            }),
+        ], group_id="test")
+
+        recommender = RollRecommender()
+        roll_rec = recommender.recommend_roll(group, current_dte=23)
+
+        assert roll_rec.should_roll is False
+        assert roll_rec.rationale == "No roll triggers met"
+
+    def test_roll_recommender_adjustment_type(self):
+        """Roll recommendation should include adjustment type."""
+        from datetime import date, timedelta
+
+        # Both near expiry AND elevated delta = roll_out + roll_up
+        future_expiry = date.today() + timedelta(days=5)
+        group = PositionGroup.from_legs([
+            pd.Series({
+                "underlying": "AAPL", "expiry": future_expiry.isoformat(), "right": "C",
+                "strike": 150.0, "quantity": -1.0, "avg_price": 5.0,
+                "market_price": 10.0, "sec_type": "OPT", "multiplier": 100.0,
+                "delta": -0.55,
+            }),
+        ], group_id="test")
+
+        recommender = RollRecommender()
+        roll_rec = recommender.recommend_roll(group, current_dte=5)
+
+        assert roll_rec.should_roll is True
+        assert roll_rec.adjustment_type is not None

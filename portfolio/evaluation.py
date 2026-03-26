@@ -11,6 +11,17 @@ from loguru import logger
 
 
 @dataclass(slots=True)
+class RollRecommendation:
+    """Details of a roll recommendation."""
+
+    should_roll: bool
+    target_expiry: Optional[date] = None
+    target_dte: int = 30
+    rationale: str = ""
+    adjustment_type: Optional[str] = None  # "roll_up", "roll_down", "roll_out", "roll_in"
+
+
+@dataclass(slots=True)
 class GrouperConfig:
     """Configuration for position grouping logic."""
 
@@ -391,10 +402,105 @@ class EvaluationResult:
         }
 
 
+class RollRecommender:
+    """
+    Determines optimal roll timing and strikes for short option positions.
+
+    Roll triggers:
+    - DTE < min_dte (typically 7-14 days)
+    - Short delta > threshold (typically 0.40-0.50)
+    - Profit target reached but DTE still elevated
+    """
+
+    def __init__(self, config: Optional[dict] = None) -> None:
+        self._config = config or {}
+        self._min_dte = self._config.get("min_dte", 7)
+        self._target_dte = self._config.get("target_dte", 30)
+        self._roll_up_delta = self._config.get("roll_up_delta", 0.40)
+        self._profit_roll_threshold = self._config.get("profit_threshold", 0.5)
+
+    def recommend_roll(
+        self,
+        group: PositionGroup,
+        current_dte: Optional[int] = None
+    ) -> RollRecommendation:
+        """Determine if and how a position should be rolled.
+
+        Args:
+            group: PositionGroup to evaluate for roll
+            current_dte: Current days to expiry (optional, will compute if not provided)
+
+        Returns:
+            RollRecommendation with roll decision and details
+        """
+        if current_dte is None:
+            current_dte = group.days_to_expiry()
+
+        reasons_to_roll = []
+        adjustment_type = None
+
+        # Check DTE-based roll
+        if current_dte is not None and current_dte < self._min_dte:
+            reasons_to_roll.append(f"Near expiry ({current_dte} DTE)")
+            adjustment_type = "roll_out"
+
+        # Check delta-based roll for short positions
+        short_delta = self._get_max_short_delta(group)
+        if abs(short_delta) > self._roll_up_delta:
+            reasons_to_roll.append(f"Short delta elevated ({short_delta:.2f})")
+            if adjustment_type == "roll_out":
+                adjustment_type = "roll_out_and_up"
+            else:
+                adjustment_type = "roll_up"
+
+        # Check profit-based roll
+        if group.pnl_pct > self._profit_roll_threshold * 100:
+            if current_dte is not None and current_dte > 14:
+                reasons_to_roll.append(f"Profit target reached ({group.pnl_pct:.0f}%)")
+
+        if not reasons_to_roll:
+            return RollRecommendation(
+                should_roll=False,
+                rationale="No roll triggers met",
+            )
+
+        # Calculate target expiry
+        target_expiry = None
+        if current_dte is not None:
+            target_expiry = date.today() + timedelta(days=self._target_dte)
+
+        return RollRecommendation(
+            should_roll=True,
+            target_expiry=target_expiry,
+            target_dte=self._target_dte,
+            rationale="; ".join(reasons_to_roll),
+            adjustment_type=adjustment_type,
+        )
+
+    def _get_max_short_delta(self, group: PositionGroup) -> float:
+        """Get the maximum absolute delta among short legs.
+
+        Args:
+            group: PositionGroup to analyze
+
+        Returns:
+            Maximum absolute delta value among short legs
+        """
+        max_delta = 0.0
+        for leg in group.legs:
+            qty = float(leg.get("quantity", 0.0) or 0.0)
+            if qty < 0:  # Short leg
+                delta = abs(float(leg.get("delta", 0.0) or 0.0))
+                max_delta = max(max_delta, delta)
+        return max_delta
+
+
 __all__ = [
     "Recommendation",
     "PositionGroup",
     "EvaluationResult",
+    "RollRecommendation",
+    "RollRecommender",
     "GrouperConfig",
     "PositionGrouper",
     "PositionEvaluator",
@@ -638,6 +744,7 @@ class PositionEvaluator:
             "roll_dte_target": self._config.get("roll_dte_target", 30),
             "close_winner_dte": self._config.get("close_winner_dte", 7),
         }
+        self._roll_recommender = RollRecommender(config)
 
     def evaluate(self, groups: List[PositionGroup]) -> List[EvaluationResult]:
         """Evaluate all position groups and return recommendations.
@@ -676,6 +783,26 @@ class PositionEvaluator:
         recommendation, confidence, rationale, suggested_action = self._apply_rules(
             group, days_to_expiry, pnl_pct, is_credit
         )
+
+        # Enhance roll recommendations with RollRecommender
+        if recommendation == Recommendation.ROLL:
+            roll_rec = self._roll_recommender.recommend_roll(group, days_to_expiry)
+            if roll_rec.should_roll and roll_rec.adjustment_type:
+                action = f"Roll {group.underlying} {roll_rec.adjustment_type.replace('_', ' ')}"
+                if roll_rec.target_dte:
+                    action += f" to {roll_rec.target_dte} DTE"
+                return EvaluationResult(
+                    group_id=group.group_id,
+                    underlying=group.underlying,
+                    strategy_type=group.strategy_type,
+                    recommendation=recommendation,
+                    confidence=confidence,
+                    rationale=f"{rationale}; {roll_rec.rationale}",
+                    suggested_action=action,
+                    pnl_pct=pnl_pct,
+                    days_to_expiry=days_to_expiry,
+                    net_delta=group.net_delta,
+                )
 
         logger.debug(
             "Evaluated group {group_id}: {recommendation} ({rationale})",
