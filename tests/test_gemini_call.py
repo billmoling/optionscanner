@@ -32,7 +32,7 @@ def _resolve_api_key() -> tuple[str | None, str]:
 api_key, api_key_source = _resolve_api_key()
 
 if not api_key:
-    raise RuntimeError("Set GOOGLE_API_KEY or GEMINI_API_KEY in your environment before running this script.")
+    pytest.skip("Set GOOGLE_API_KEY or GEMINI_API_KEY in your environment to run this test", allow_module_level=True)
 
 log.info(f"[Gemini] Loaded .env; using API key from {api_key_source} (length={len(api_key)})")
 log.info(f"[Gemini] Model: {REQUEST_MODEL}")
