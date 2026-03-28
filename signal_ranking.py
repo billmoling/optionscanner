@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from data.history import HistoryStore
+from data.similarity import SimilarityMatcher, SignalFeatures
 from strategies.base import TradeSignal
 from trade_history import TradeHistory, StrategyStats
 
@@ -23,6 +25,7 @@ class SignalScore:
     win_rate_score: float
     rr_score: float
     perf_score: float
+    similarity_score: float
     reason: str
     weights: Dict[str, float] = field(default_factory=dict)
 
@@ -37,6 +40,7 @@ class SignalScore:
             "win_rate_score": round(self.win_rate_score, 3),
             "rr_score": round(self.rr_score, 3),
             "perf_score": round(self.perf_score, 3),
+            "similarity_score": round(self.similarity_score, 3),
             "reason": self.reason,
         }
 
@@ -55,11 +59,11 @@ class SignalRanker:
 
     Composite score formula:
         score = (win_rate_w * win_rate_score) + (rr_w * rr_score) + (perf_w * perf_score)
-                - context_penalty
+                + (similarity_w * similarity_score) - context_penalty
 
     Weights shift based on trade count per strategy:
-        - < 30 trades: win_rate=0.5, rr=0.3, perf=0.2 (weighted toward published)
-        - >= 30 trades: win_rate=0.2, rr=0.3, perf=0.5 (weighted toward live performance)
+        - < 30 trades: win_rate=0.5, rr=0.3, perf=0.2, similarity=0.0
+        - >= 30 trades: win_rate=0.2, rr=0.3, perf=0.4, similarity=0.1
 
     Context penalties:
         - Pre-earnings symbols: -0.20
@@ -73,15 +77,22 @@ class SignalRanker:
         strategy_configs: Dict[str, StrategyConfig],
         top_k: int = 5,
         market_context: Optional[MarketContextProvider] = None,
+        signal_history: Optional[HistoryStore] = None,
     ) -> None:
         self._trade_history = trade_history
         self._strategy_configs = strategy_configs or {}
         self._top_k = top_k
         self._market_context = market_context
+        self._signal_history = signal_history
+
+        # Initialize similarity matcher if signal history provided
+        self._similarity_matcher: Optional[SimilarityMatcher] = None
+        if signal_history is not None:
+            self._similarity_matcher = SimilarityMatcher(signal_history)
 
         # Default weights
-        self._weights_initial = {"win_rate": 0.5, "rr": 0.3, "perf": 0.2}
-        self._weights_mature = {"win_rate": 0.2, "rr": 0.3, "perf": 0.5}
+        self._weights_initial = {"win_rate": 0.5, "rr": 0.3, "perf": 0.2, "similarity": 0.0}
+        self._weights_mature = {"win_rate": 0.2, "rr": 0.3, "perf": 0.4, "similarity": 0.1}
 
     def rank_signals(
         self,
@@ -130,6 +141,7 @@ class SignalRanker:
         win_rate_score = self._compute_win_rate_score(stats, config.published_win_rate)
         rr_score = self._compute_rr_score(signal)
         perf_score = self._compute_perf_score(stats)
+        similarity_score = self._compute_similarity_score(strategy_name, signal)
 
         # Compute context penalty
         context_penalty = self._compute_context_penalty(signal.symbol)
@@ -139,6 +151,7 @@ class SignalRanker:
             weights["win_rate"] * win_rate_score
             + weights["rr"] * rr_score
             + weights["perf"] * perf_score
+            + weights["similarity"] * similarity_score
             - context_penalty
         )
 
@@ -152,6 +165,7 @@ class SignalRanker:
             perf_score,
             trade_count,
             context_penalty,
+            similarity_score,
         )
 
         return SignalScore(
@@ -161,6 +175,7 @@ class SignalRanker:
             win_rate_score=win_rate_score,
             rr_score=rr_score,
             perf_score=perf_score,
+            similarity_score=similarity_score,
             reason=reason,
             weights=weights,
         )
@@ -170,6 +185,68 @@ class SignalRanker:
         if trade_count >= target:
             return dict(self._weights_mature)
         return dict(self._weights_initial)
+
+    def _compute_similarity_score(
+        self,
+        strategy_name: str,
+        signal: TradeSignal,
+    ) -> float:
+        """Compute historical similarity score (0-1 scale).
+
+        Uses SimilarityMatcher to find historically similar signals
+        and computes their win rate. Returns 0.5 if no history available.
+
+        Args:
+            strategy_name: Strategy name
+            signal: Trade signal to score
+
+        Returns:
+            Similarity score (0-1), higher = more favorable historical similarity
+        """
+        if self._similarity_matcher is None:
+            return 0.5  # Neutral score if no history available
+
+        try:
+            # Extract features from signal using market context
+            market_context_dict = None
+            if self._market_context:
+                ctx = self._market_context.get_context()
+                if ctx:
+                    market_context_dict = ctx.to_dict()
+
+            features = self._similarity_matcher.extract_features(
+                signal,
+                market_context_dict or {}
+            )
+
+            # Find similar historical signals
+            similar_outcomes = self._similarity_matcher.find_similar(features, top_k=20)
+
+            if not similar_outcomes:
+                return 0.5  # No similar history
+
+            # Compute win rate from similar outcomes
+            historical_win_rate = self._similarity_matcher.compute_historical_win_rate(
+                similar_outcomes
+            )
+
+            logger.info(
+                "Similarity score computed | strategy={strategy} symbol={symbol} similar={count} hist_wr={wr:.0%}",
+                strategy=strategy_name,
+                symbol=signal.symbol,
+                count=len(similar_outcomes),
+                wr=historical_win_rate
+            )
+
+            return historical_win_rate
+        except Exception as exc:
+            logger.warning(
+                "Failed to compute similarity score | strategy={strategy} symbol={symbol} error={error}",
+                strategy=strategy_name,
+                symbol=signal.symbol,
+                error=exc
+            )
+            return 0.5  # Fallback to neutral
 
     def _compute_win_rate_score(
         self,
@@ -269,6 +346,7 @@ class SignalRanker:
         perf_score: float,
         trade_count: int,
         context_penalty: float = 0.0,
+        similarity_score: float = 0.5,
     ) -> str:
         """Generate human-readable ranking reason."""
         reasons: List[str] = []
@@ -302,6 +380,14 @@ class SignalRanker:
                 reasons.append(f"strong live perf ({stats.win_rate:.0%} win, ${stats.avg_pnl:.2f} avg)")
             elif perf_score >= 0.4:
                 reasons.append(f"stable live perf ({stats.win_rate:.0%} win)")
+
+        # Historical similarity assessment
+        if similarity_score >= 0.65:
+            reasons.append(f"favorable historical pattern ({similarity_score:.0%} similar win rate)")
+        elif similarity_score >= 0.5:
+            reasons.append("neutral historical pattern")
+        else:
+            reasons.append(f"unfavorable historical pattern ({similarity_score:.0%} similar win rate)")
 
         # Context penalties
         if context_penalty >= 0.3:

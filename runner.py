@@ -13,6 +13,7 @@ from loguru import logger
 from zoneinfo import ZoneInfo
 
 from ai_agents import BatchSelectionResult, SignalBatchSelector, AISignalSelector, AISelectionResult
+from data.history import HistoryStore
 from execution import TradeExecutor
 from notifications import SlackNotifier
 from option_data import BaseDataFetcher, OptionChainSnapshot
@@ -115,6 +116,7 @@ async def run_once(
     # Initialize trade history and signal ranker
     data_dir = Path(config.get("data_dir", "./data")) if config else Path("./data")
     trade_history = TradeHistory(data_dir / "trade_history.json")
+    signal_history = HistoryStore(data_dir)  # Module E.4: HistoryStore for signal tracking
     strategy_configs = load_strategy_configs(config) if config else {}
 
     # Initialize market context provider
@@ -149,11 +151,13 @@ async def run_once(
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Rank signals using composite scoring (top 5 quantitative)
+    # Module E.4: Inject signal_history for historical similarity scoring
     ranker = SignalRanker(
         trade_history=trade_history,
         strategy_configs=strategy_configs,
         top_k=5,
         market_context=market_context,
+        signal_history=signal_history,
     )
     ranked_signals = ranker.rank_signals(aggregated_signals)
 
