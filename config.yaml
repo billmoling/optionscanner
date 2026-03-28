@@ -190,3 +190,35 @@ automation:
     max_positions: 5
     use_market_orders: false
     limit_padding_pct: 0.03
+
+# Signal Quality Enhancement Modules
+data_enhancer:
+  history:
+    enabled: true
+    storage_dir: "./data"
+  options_flow:
+    enabled: true
+    volume_oi_threshold: 2.0
+  similarity:
+    enabled: true
+    top_k: 10
+    half_life_days: 30
+
+regime_adapter:
+  enabled: true
+  vix_low: 15.0
+  vix_high: 25.0
+  vix_extreme: 35.0
+
+entry_filter:
+  enabled: true
+  confluence:
+    min_aligned: 3
+  patterns:
+    enabled: true
+    min_confidence: 0.5
+
+exit_engine:
+  enabled: true
+  default_profit_target: 0.50
+  default_close_dte: 5
