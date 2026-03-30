@@ -23,6 +23,9 @@ results/
 *.csv
 *.parquet
 
+# Exception for src/data module
+!src/data/
+
 # === OS-specific ===
 .DS_Store
 Thumbs.db

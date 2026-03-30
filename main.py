@@ -288,7 +288,7 @@ def main(argv: Optional[List[str]] = None) -> None:
             "--portfolio-only specified; ignoring DISABLE_PORTFOLIO_MANAGER environment override."
         )
 
-    def maybe_run_portfolio_manager(fetcher: IBKRDataFetcher) -> None:
+    def maybe_run_portfolio_manager() -> None:
         if disable_portfolio_manager and not portfolio_only:
             logger.info("Portfolio manager disabled via DISABLE_PORTFOLIO_MANAGER")
             return

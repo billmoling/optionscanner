@@ -49,11 +49,14 @@ def configure_logging(
 
     logger.remove()
 
+    # Add patch to ensure 'component' key always exists in extra
+    logger.patch(lambda record: record["extra"].setdefault("component", "app"))
+
     # Console sink with structured format
     logger.add(
         sys.stdout,
         level=console_level,
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra.get('component', 'app'): <20} | {message}",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[component]: <20} | {message}",
     )
 
     # File sink with detailed format
@@ -65,7 +68,7 @@ def configure_logging(
         enqueue=True,
         backtrace=True,
         diagnose=True,
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra.get('component', 'app'): <20} | {name}:{line} | {message}",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[component]: <20} | {name}:{line} | {message}",
     )
 
     # Loki sink for Grafana Cloud
