@@ -4,9 +4,6 @@ FROM python:3.12.12-slim-bookworm
 # Set the working directory
 WORKDIR /app
 
-# Add src/ to Python path for imports like 'from data.history import'
-ENV PYTHONPATH="/app/src:${PYTHONPATH}"
-
 # Install runtime/build dependencies and keep the image small
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
