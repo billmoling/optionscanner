@@ -16,7 +16,7 @@ except ImportError:
     genai = None  # type: ignore
     types = None  # type: ignore
 
-from economic_calendar import EconomicEvent, EconomicEventTracker
+from optionscanner.economic_calendar import EconomicEvent, EconomicEventTracker
 
 
 class EconomicCalendarAIFetcher:

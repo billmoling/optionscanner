@@ -8,8 +8,8 @@ from typing import Dict, List, Optional
 
 from loguru import logger
 
-from data.history import HistoryStore, SignalOutcome
-from strategies.base import TradeSignal
+from optionscanner.data.history import HistoryStore, SignalOutcome
+from optionscanner.strategies.base import TradeSignal
 
 
 @dataclass(slots=True)

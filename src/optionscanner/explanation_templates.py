@@ -4,8 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-from option_data import OptionChainSnapshot
-from strategies.base import TradeSignal
+from optionscanner.option_data import OptionChainSnapshot
+from optionscanner.strategies.base import TradeSignal
 
 
 @dataclass(slots=True)

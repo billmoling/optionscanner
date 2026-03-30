@@ -7,7 +7,7 @@ from typing import Any, Iterable, List, Optional, Sequence, Tuple
 import pandas as pd
 from loguru import logger
 
-from market_state import MarketState, MarketStateProvider
+from optionscanner.market_state import MarketState, MarketStateProvider
 
 from .base import BaseOptionStrategy, SignalLeg, TradeSignal
 

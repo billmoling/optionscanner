@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from loguru import logger
 
-from data.history import HistoryStore
-from data.similarity import SimilarityMatcher, SignalFeatures
-from strategies.base import TradeSignal
-from trade_history import TradeHistory, StrategyStats
+from optionscanner.data.history import HistoryStore
+from optionscanner.data.similarity import SimilarityMatcher, SignalFeatures
+from optionscanner.strategies.base import TradeSignal
+from optionscanner.trade_history import TradeHistory, StrategyStats
 
 if TYPE_CHECKING:
-    from market_context import MarketContextProvider
+    from optionscanner.market_context import MarketContextProvider
 
 
 @dataclass(slots=True)

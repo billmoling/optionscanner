@@ -8,8 +8,8 @@ from typing import Any, Iterable, List, Optional, Tuple
 import pandas as pd
 from loguru import logger
 
-from earnings_data import EarningsFetcher
-from market_context import MarketContextProvider
+from optionscanner.earnings_data import EarningsFetcher
+from optionscanner.market_context import MarketContextProvider
 
 from .base import BaseOptionStrategy, SignalLeg, TradeSignal
 

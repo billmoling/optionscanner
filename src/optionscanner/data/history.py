@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 
 from loguru import logger
 
-from strategies.base import TradeSignal
+from optionscanner.strategies.base import TradeSignal
 
 
 @dataclass(slots=True)

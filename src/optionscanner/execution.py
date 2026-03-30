@@ -11,9 +11,9 @@ import pandas as pd
 from ib_async import IB, LimitOrder, MarketOrder, Option, Stock
 from loguru import logger
 
-from notifications import SlackNotifier
-from option_data import OptionChainSnapshot
-from strategies.base import TradeSignal
+from optionscanner.notifications import SlackNotifier
+from optionscanner.option_data import OptionChainSnapshot
+from optionscanner.strategies.base import TradeSignal
 
 
 @dataclass(slots=True)
