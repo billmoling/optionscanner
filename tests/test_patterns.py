@@ -2,7 +2,7 @@
 import pytest
 import pandas as pd
 from datetime import datetime, timedelta, timezone
-from entry.patterns import PatternRecognizer, PatternSignal
+from optionscanner.entry.patterns import PatternRecognizer, PatternSignal
 
 
 class TestPatternRecognizer:

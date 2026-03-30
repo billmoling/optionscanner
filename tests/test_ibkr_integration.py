@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from ib_async import IB, Stock
 
-from option_data import MARKET_DATA_TYPE_CODES
+from optionscanner.option_data import MARKET_DATA_TYPE_CODES
 
 logging.basicConfig(
     level=logging.INFO,

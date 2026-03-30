@@ -6,10 +6,10 @@ from typing import Dict, List, Sequence
 import pandas as pd
 import pytest
 
-from main import discover_strategies
-from option_data import LocalDataFetcher
-from runner import run_once
-from technical_indicators import TechnicalIndicatorProcessor
+from optionscanner.main import discover_strategies
+from optionscanner.option_data import LocalDataFetcher
+from optionscanner.runner import run_once
+from optionscanner.technical_indicators import TechnicalIndicatorProcessor
 
 
 def _convert_history_to_parquet(source: Path, destination: Path) -> List[str]:

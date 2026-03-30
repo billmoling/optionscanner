@@ -2,12 +2,12 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from market_state import MarketState, MarketStateProvider
-from strategies.strategy_covered_call import CoveredCallStrategy
-from strategies.strategy_iron_condor import IronCondorStrategy
-from strategies.strategy_pmcc import PoorMansCoveredCallStrategy
-from strategies.strategy_put_credit_spread import PutCreditSpreadStrategy
-from strategies.strategy_vertical_spread import VerticalSpreadStrategy
+from optionscanner.market_state import MarketState, MarketStateProvider
+from optionscanner.strategies.strategy_covered_call import CoveredCallStrategy
+from optionscanner.strategies.strategy_iron_condor import IronCondorStrategy
+from optionscanner.strategies.strategy_pmcc import PoorMansCoveredCallStrategy
+from optionscanner.strategies.strategy_put_credit_spread import PutCreditSpreadStrategy
+from optionscanner.strategies.strategy_vertical_spread import VerticalSpreadStrategy
 
 
 def make_snapshot(underlying: float, options: list[dict]) -> dict:

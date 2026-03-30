@@ -1,7 +1,7 @@
 # tests/test_flow.py
 import pytest
 from datetime import datetime, timezone
-from data.flow import OptionsFlowFetcher, FlowAlert
+from optionscanner.data.flow import OptionsFlowFetcher, FlowAlert
 
 
 class TestOptionsFlowFetcher:

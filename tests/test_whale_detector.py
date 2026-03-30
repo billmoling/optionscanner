@@ -2,8 +2,8 @@
 import unittest
 from datetime import datetime, timezone
 
-from whale_detector import WhaleActivity, WhaleDetector, WhaleDirection
-from reddit_monitor import RedditPost, RedditComment
+from optionscanner.whale_detector import WhaleActivity, WhaleDetector, WhaleDirection
+from optionscanner.reddit_monitor import RedditPost, RedditComment
 
 
 class WhaleDetectorTests(unittest.TestCase):
@@ -210,7 +210,7 @@ class RedditMonitorTests(unittest.TestCase):
 
     def test_ticker_extraction(self) -> None:
         """Test extraction of ticker symbols from text."""
-        from reddit_monitor import RedditMonitor
+        from optionscanner.reddit_monitor import RedditMonitor
 
         monitor = RedditMonitor()
 
@@ -223,7 +223,7 @@ class RedditMonitorTests(unittest.TestCase):
 
     def test_ticker_extraction_excludes_common_words(self) -> None:
         """Test that common words are excluded from ticker extraction."""
-        from reddit_monitor import RedditMonitor
+        from optionscanner.reddit_monitor import RedditMonitor
 
         monitor = RedditMonitor()
 
@@ -237,7 +237,7 @@ class RedditMonitorTests(unittest.TestCase):
 
     def test_ticker_extraction_single_letter(self) -> None:
         """Test that single letters are excluded."""
-        from reddit_monitor import RedditMonitor
+        from optionscanner.reddit_monitor import RedditMonitor
 
         monitor = RedditMonitor()
 
@@ -249,7 +249,7 @@ class RedditMonitorTests(unittest.TestCase):
 
     def test_monitor_initialization(self) -> None:
         """Test that RedditMonitor initializes without API credentials."""
-        from reddit_monitor import RedditMonitor
+        from optionscanner.reddit_monitor import RedditMonitor
 
         monitor = RedditMonitor()
         result = monitor.initialize()
@@ -259,7 +259,7 @@ class RedditMonitorTests(unittest.TestCase):
 
     def test_monitor_custom_subreddits(self) -> None:
         """Test initialization with custom subreddits."""
-        from reddit_monitor import RedditMonitor
+        from optionscanner.reddit_monitor import RedditMonitor
 
         monitor = RedditMonitor(subreddits=["technology", "investing"])
         self.assertEqual(monitor.subreddits, ["technology", "investing"])

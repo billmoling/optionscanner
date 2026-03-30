@@ -9,9 +9,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from ib_async import IB, Option, Stock
 
-from execution import TradeExecutionConfig, TradeExecutor
-from option_data import MARKET_DATA_TYPE_CODES, OptionChainSnapshot
-from strategies.base import TradeSignal
+from optionscanner.execution import TradeExecutionConfig, TradeExecutor
+from optionscanner.option_data import MARKET_DATA_TYPE_CODES, OptionChainSnapshot
+from optionscanner.strategies.base import TradeSignal
 
 logging.basicConfig(
     level=logging.INFO,

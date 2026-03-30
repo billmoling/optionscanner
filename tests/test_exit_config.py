@@ -1,6 +1,6 @@
 """Tests for ExitEngine foundation."""
 import pytest
-from src.exit.config import ExitRule, ExitEngine
+from optionscanner.exit.config import ExitRule, ExitEngine
 
 
 class TestExitRule:

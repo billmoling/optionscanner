@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from notifications.slack import SlackNotifier
+from optionscanner.notifications.slack import SlackNotifier
 
 
 class SlackNotifierTests(unittest.TestCase):

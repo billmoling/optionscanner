@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pandas as pd
 from dotenv import load_dotenv
 
-from notifications.slack import SlackNotifier
+from optionscanner.notifications.slack import SlackNotifier
 
 logging.basicConfig(
     level=logging.INFO,
