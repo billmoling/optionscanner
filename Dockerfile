@@ -22,18 +22,21 @@ ENV LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
     TZ=UTC
 
-# Copy only the requirements file first to leverage Docker cache
+# Copy pyproject.toml and requirements.txt first
+COPY pyproject.toml .
 COPY requirements.txt .
 
 # Install uv once and keep it on PATH
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
 
-# Install Python dependencies with uv
-RUN uv pip install --system -r requirements.txt
+# Install the package in editable mode (includes all dependencies from pyproject.toml)
+RUN uv pip install --system -e .
 
-# Copy the rest of your application code
-COPY . .
+# Copy application code (src/, tests/, config.yaml)
+COPY src/ ./src/
+COPY tests/ ./tests/
+COPY config.yaml .
 
-# Set the default command (we will override this in docker-compose.yml)
-CMD ["python", "main.py", "--run-mode", "local", "--config", "config.yaml"]
+# Set the default command using the installed package
+CMD ["python", "-m", "optionscanner.main", "--run-mode", "local", "--config", "config.yaml"]

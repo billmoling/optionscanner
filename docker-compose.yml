@@ -61,8 +61,8 @@ services:
         - ./config.yaml:/app/config.yaml
       # Command to run the scanner on the configured schedule
       command: >
-        python main.py 
-          --run-mode schedule 
+        python -m optionscanner.main
+          --run-mode schedule
           --config config.yaml
       # This ensures the gateway is started before your app tries to run
       depends_on:
