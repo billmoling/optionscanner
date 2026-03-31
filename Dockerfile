@@ -26,6 +26,9 @@ ENV LANG=en_US.UTF-8 \
 COPY pyproject.toml .
 COPY requirements.txt .
 
+# Copy src/ directory (required for editable install to work)
+COPY src/ ./src/
+
 # Install uv once and keep it on PATH
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:${PATH}"
@@ -33,8 +36,7 @@ ENV PATH="/root/.local/bin:${PATH}"
 # Install the package in editable mode (includes all dependencies from pyproject.toml)
 RUN uv pip install --system -e .
 
-# Copy application code (src/, tests/, config.yaml)
-COPY src/ ./src/
+# Copy remaining application code (tests/, config.yaml)
 COPY tests/ ./tests/
 COPY config.yaml .
 
