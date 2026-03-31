@@ -37,3 +37,7 @@ include = ["optionscanner*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "expensive: marks tests that cost API tokens or have side effects (deselect with '-m \"not expensive\"')",
+]
+addopts = "-m 'not expensive'"
