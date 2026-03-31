@@ -2,6 +2,12 @@
 
 Optionscanner is a lightweight toolkit for monitoring option chains and portfolio exposure using the Interactive Brokers (IBKR) API.
 
+## Installation
+
+```bash
+pip install -e .
+```
+
 ## IBKR gateway via Docker
 
 The `docker-compose.yml` file now focuses solely on the IBKR Gateway container. Run the gateway in Docker, keep the scanner on the host (or Raspberry Pi), and connect over the published ports. This mirrors the production deployment while keeping local development simple.
@@ -54,12 +60,22 @@ The scanner supports three execution modes that control how market data is sourc
 
 Install dependencies locally with `pip install -r requirements.txt` before running any of the commands below.
 
+## Usage
+
+```bash
+# Run directly as module
+python -m optionscanner.main --run-mode local --market-data FROZEN
+
+# Or use the CLI command
+optionscanner --run-mode local --market-data FROZEN
+```
+
 ### 1. Immediate local run (no Docker)
 
 Use this when you have captured option chain snapshots on disk and want to test strategy and Gemini integrations without starting the IBKR Gateway.
 
 ```bash
-python main.py --run-mode local --market-data FROZEN --config config.yaml
+python -m optionscanner.main --run-mode local --market-data FROZEN --config config.yaml
 ```
 
 Place snapshot files (e.g., `NVDA_20240101_120000.parquet`) under the `data_dir` configured in `config.yaml`. The run finishes after processing the locally stored data once.
@@ -69,7 +85,7 @@ Place snapshot files (e.g., `NVDA_20240101_120000.parquet`) under the `data_dir`
 Use this when you want the scanner (or just the portfolio workflow) to run automatically at the times listed under `schedule.times` in `config.yaml` (respects `schedule.timezone`).
 
 ```bash
-python main.py --run-mode schedule --config config.yaml
+python -m optionscanner.main --run-mode schedule --config config.yaml
 ```
 
 The process stays alive; ensure your Docker container remains running to honor the schedule. Combine with `--portfolio-only` to skip signal generation and run only the portfolio manager on the same schedule.
@@ -89,10 +105,10 @@ Use `--portfolio-only` when you only need the portfolio risk workflow (positions
 
 ```bash
 # Single-run portfolio workflow
-python main.py --portfolio-only --run-mode local --config config.yaml
+python -m optionscanner.main --portfolio-only --run-mode local --config config.yaml
 
 # Scheduled portfolio workflow (runs at times in config.yaml:schedule.times)
-python main.py --portfolio-only --run-mode schedule --config config.yaml
+python -m optionscanner.main --portfolio-only --run-mode schedule --config config.yaml
 ```
 
 Combine the flag with your preferred workflow to ensure the IBKR gateway container is running before the portfolio manager connects.
