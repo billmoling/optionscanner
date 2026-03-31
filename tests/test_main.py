@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from main import discover_strategies
-from strategies.strategy_put_credit_spread import PutCreditSpreadStrategy
+from optionscanner.main import discover_strategies
+from optionscanner.strategies.strategy_put_credit_spread import PutCreditSpreadStrategy
 
 
 def test_discover_strategies_respects_enabled_flag() -> None:

@@ -13,10 +13,10 @@ import pandas as pd
 import yaml
 from loguru import logger
 
-from signal_ranking import SignalScore
+from optionscanner.signal_ranking import SignalScore
 
 if TYPE_CHECKING:
-    from market_context import MarketContextProvider
+    from optionscanner.market_context import MarketContextProvider
 
 
 PostCallable = Callable[[str, Dict[str, object]], None]

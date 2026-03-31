@@ -8,8 +8,8 @@ from typing import Any, Dict, Iterable, Optional, Protocol
 import pandas as pd
 from loguru import logger
 
-from technical_indicators import TechnicalIndicatorProcessor
-from stock_data import StockDataFetcher
+from optionscanner.technical_indicators import TechnicalIndicatorProcessor
+from optionscanner.stock_data import StockDataFetcher
 
 
 class MarketState(str, Enum):

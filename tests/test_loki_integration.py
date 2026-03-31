@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from dotenv import load_dotenv
 
-from logging_utils import LokiHandler, get_logger
+from optionscanner.logging_utils import LokiHandler, get_logger
 
 logging.basicConfig(
     level=logging.INFO,

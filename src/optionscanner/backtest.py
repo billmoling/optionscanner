@@ -12,8 +12,8 @@ import pandas as pd
 
 from loguru import logger
 
-from option_data import OptionChainSnapshot
-from strategies.base import BaseOptionStrategy
+from optionscanner.option_data import OptionChainSnapshot
+from optionscanner.strategies.base import BaseOptionStrategy
 
 
 @dataclass(slots=True)
@@ -131,7 +131,7 @@ class BacktestRunner:
 
 
 def load_strategies() -> List[BaseOptionStrategy]:
-    from main import discover_strategies
+    from optionscanner.main import discover_strategies
 
     return discover_strategies()
 

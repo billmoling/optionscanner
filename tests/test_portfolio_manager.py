@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 from unittest.mock import Mock
 
-from portfolio.manager import PortfolioManager
-from portfolio.evaluation import (
+from optionscanner.portfolio.manager import PortfolioManager
+from optionscanner.portfolio.evaluation import (
     PositionGrouper,
     PositionEvaluator,
     GrouperConfig,
@@ -256,7 +256,7 @@ class TestPortfolioReporterEvaluationOutput:
         """PortfolioReporter should write evaluation results to CSV."""
         import tempfile
         from pathlib import Path
-        from portfolio.report import PortfolioReporter, ReporterConfig
+        from optionscanner.portfolio.report import PortfolioReporter, ReporterConfig
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ReporterConfig(

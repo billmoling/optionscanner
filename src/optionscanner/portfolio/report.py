@@ -10,8 +10,8 @@ from typing import Dict, Iterable, List, Optional, Sequence
 import pandas as pd
 from loguru import logger
 
-from gemini_client import GeminiClient, GeminiClientError
-from notifications import SlackNotifier
+from optionscanner.gemini_client import GeminiClient, GeminiClientError
+from optionscanner.notifications import SlackNotifier
 
 from .rules import RiskBreach
 from .evaluation import EvaluationResult

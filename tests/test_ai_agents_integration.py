@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from gemini_client import GeminiClient, GeminiClientError
+from optionscanner.gemini_client import GeminiClient, GeminiClientError
 
 logging.basicConfig(
     level=logging.INFO,

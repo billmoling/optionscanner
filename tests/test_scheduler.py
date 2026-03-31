@@ -3,7 +3,7 @@ from datetime import datetime
 
 from zoneinfo import ZoneInfo
 
-from scheduling import compute_next_run, parse_schedule_times
+from optionscanner.scheduling import compute_next_run, parse_schedule_times
 
 
 class SchedulerUtilsTests(unittest.TestCase):

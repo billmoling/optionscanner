@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from loguru import logger
 
-from whale_detector import WhaleActivity, WhaleDetector, WhaleDirection
+from optionscanner.whale_detector import WhaleActivity, WhaleDetector, WhaleDirection
 
 from .base import BaseOptionStrategy, SignalLeg, TradeSignal
 

@@ -17,20 +17,20 @@ import yaml
 from loguru import logger
 
 from dotenv import load_dotenv
-from logging_utils import configure_logging, LoggingContext
-from execution import (
+from optionscanner.logging_utils import configure_logging, LoggingContext
+from optionscanner.execution import (
     PortfolioActionExecutor,
     PortfolioExecutionConfig,
     TradeExecutionConfig,
     TradeExecutor,
 )
-from notifications import SlackNotifier
-from option_data import IBKRDataFetcher, MARKET_DATA_TYPE_CODES
-from portfolio.manager import PortfolioManager
-from runner import run_once, run_scheduler
-from strategies.base import BaseOptionStrategy
-from stock_data import StockDataFetcher
-from technical_indicators import TechnicalIndicatorProcessor
+from optionscanner.notifications import SlackNotifier
+from optionscanner.option_data import IBKRDataFetcher, MARKET_DATA_TYPE_CODES
+from optionscanner.portfolio.manager import PortfolioManager
+from optionscanner.runner import run_once, run_scheduler
+from optionscanner.strategies.base import BaseOptionStrategy
+from optionscanner.stock_data import StockDataFetcher
+from optionscanner.technical_indicators import TechnicalIndicatorProcessor
 
 
 logging.basicConfig(
@@ -60,7 +60,7 @@ def discover_strategies(overrides: Optional[Dict[str, Any]] = None) -> List[Base
     for module_info in pkgutil.iter_modules([str(strategy_dir)]):
         if not module_info.name.startswith("strategy_"):
             continue
-        module = importlib.import_module(f"strategies.{module_info.name}")
+        module = importlib.import_module(f"optionscanner.strategies.{module_info.name}")
         for attr in dir(module):
             obj = getattr(module, attr)
             if (

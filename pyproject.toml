@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "optionscanner"
+version = "0.1.0"
+description = "Options trading scanner and signal generator"
+requires-python = ">=3.12"
+dependencies = [
+    "nautilus_trader",
+    "pandas",
+    "ib_async",
+    "loguru",
+    "pyyaml",
+    "google-genai",
+    "python-dotenv",
+    "numpy",
+    "pyarrow",
+    "praw",
+    "requests",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[project.scripts]
+optionscanner = "optionscanner.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["optionscanner*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

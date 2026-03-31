@@ -3,9 +3,9 @@ import pytest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from data.similarity import SimilarityMatcher, SignalFeatures
-from data.history import HistoryStore, SignalOutcome
-from strategies.base import TradeSignal
+from optionscanner.data.similarity import SimilarityMatcher, SignalFeatures
+from optionscanner.data.history import HistoryStore, SignalOutcome
+from optionscanner.strategies.base import TradeSignal
 
 
 class TestSimilarityMatcher:

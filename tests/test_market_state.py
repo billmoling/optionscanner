@@ -4,8 +4,8 @@ import unittest
 
 import pandas as pd
 
-from market_state import MarketState, MarketStateClassifier
-from technical_indicators import TechnicalIndicatorProcessor
+from optionscanner.market_state import MarketState, MarketStateClassifier
+from optionscanner.technical_indicators import TechnicalIndicatorProcessor
 
 
 class MarketStateClassifierTests(unittest.TestCase):

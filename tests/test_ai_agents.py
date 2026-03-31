@@ -1,12 +1,12 @@
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from ai_agents import (
+from optionscanner.ai_agents import (
     GeminiClientError,
     SignalValidationAgent,
 )
-from option_data import OptionChainSnapshot
-from strategies.base import TradeSignal
+from optionscanner.option_data import OptionChainSnapshot
+from optionscanner.strategies.base import TradeSignal
 
 
 class DummyGeminiClient:

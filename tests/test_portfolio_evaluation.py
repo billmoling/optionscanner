@@ -4,7 +4,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from portfolio.evaluation import (
+from optionscanner.portfolio.evaluation import (
     EvaluationResult,
     GrouperConfig,
     PositionEvaluator,
@@ -1041,7 +1041,7 @@ class TestEvaluationResultFormatting:
         """write_outputs() should optionally include evaluations in CSV."""
         import tempfile
         from pathlib import Path
-        from portfolio.report import PortfolioReporter, ReporterConfig
+        from optionscanner.portfolio.report import PortfolioReporter, ReporterConfig
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config = ReporterConfig(
@@ -1096,7 +1096,7 @@ class TestEvaluationResultFormatting:
         import tempfile
         from unittest.mock import Mock
         from pathlib import Path
-        from portfolio.manager import PortfolioManager
+        from optionscanner.portfolio.manager import PortfolioManager
 
         with tempfile.TemporaryDirectory() as tmpdir:
             ib_mock = Mock()

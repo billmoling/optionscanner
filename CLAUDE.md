@@ -18,6 +18,10 @@ source .venv/bin/activate
 
 # Or use uv run to execute commands in the venv
 uv run <command>
+
+# Or install the package and use directly
+pip install -e .
+optionscanner --help
 ```
 
 ### Examples
@@ -27,7 +31,7 @@ uv run <command>
 uv run pytest
 
 # Running the application
-uv run python src/main.py
+uv run python -m optionscanner.main
 
 # Running mypy
 uv run mypy src/
@@ -40,32 +44,32 @@ uv pip install <package>
 
 ```bash
 # Install dependencies
-pip install -r requirements.txt
+pip install -e .
 
 # Run tests
 pytest
 
 # Run scanner (single run with frozen data)
-python main.py --run-mode local --market-data FROZEN
+python -m optionscanner.main --run-mode local --market-data FROZEN
 
 # Run on schedule
-python main.py --run-mode schedule
+python -m optionscanner.main --run-mode schedule
 ```
 
 ## Architecture
 
 ### Core Modules
 
-- **`main.py`**: Entry point with CLI for run modes (`local`, `schedule`) and `--portfolio-only` flag
-- **`runner.py`**: Execution orchestration (`run_once`, `run_scheduler`)
-- **`option_data.py`**: IBKR option chain fetching via `IBKRDataFetcher`; `OptionChainSnapshot` container
-- **`execution.py`**: Trade/portfolio execution adapters (`TradeExecutor`, `PortfolioActionExecutor`)
-- **`portfolio/manager.py`**: Coordinates position loading, Greeks computation, risk evaluation, and Slack notifications
+- **`src/optionscanner/main.py`**: Entry point with CLI for run modes (`local`, `schedule`) and `--portfolio-only` flag
+- **`src/optionscanner/runner.py`**: Execution orchestration (`run_once`, `run_scheduler`)
+- **`src/optionscanner/option_data.py`**: IBKR option chain fetching via `IBKRDataFetcher`; `OptionChainSnapshot` container
+- **`src/optionscanner/execution.py`**: Trade/portfolio execution adapters (`TradeExecutor`, `PortfolioActionExecutor`)
+- **`src/optionscanner/portfolio/manager.py`**: Coordinates position loading, Greeks computation, risk evaluation, and Slack notifications
 
 ### Strategy Framework
 
-- **`strategies/base.py`**: `BaseOptionStrategy` (extends NautilusTrader `Strategy`), `TradeSignal`, `SignalLeg`
-- **`strategies/strategy_*.py`**: Concrete strategies (PutCreditSpread, VerticalSpread, IronCondor, CoveredCall, PMCC, VixFearFade, TqqqQqqRotation)
+- **`src/optionscanner/strategies/base.py`**: `BaseOptionStrategy` (extends NautilusTrader `Strategy`), `TradeSignal`, `SignalLeg`
+- **`src/optionscanner/strategies/strategy_*.py`**: Concrete strategies (PutCreditSpread, VerticalSpread, IronCondor, CoveredCall, PMCC, VixFearFade, TqqqQqqRotation)
 - Strategies are auto-discovered at runtime; can be enabled/disabled/tuned via `config.yaml:strategies` block
 
 ### Data Flow
@@ -82,13 +86,13 @@ IBKR Gateway → IBKRDataFetcher.fetch_all() → OptionChainSnapshot[]
 
 ### Market State System
 
-- **`market_state.py`**: Classifies underlying stocks as BULL/BEAR/UPTREND/DOWNTREND using MA crossover logic
-- **`technical_indicators.py`**: `TechnicalIndicatorProcessor` with registry pattern for SMA/RSI
+- **`src/optionscanner/market_state.py`**: Classifies underlying stocks as BULL/BEAR/UPTREND/DOWNTREND using MA crossover logic
+- **`src/optionscanner/technical_indicators.py`**: `TechnicalIndicatorProcessor` with registry pattern for SMA/RSI
 - Market state is computed from stock history and passed to strategies via `MarketStateProvider`
 
 ### Position Cache & Exit Monitoring
 
-- **`position_cache.py`**: Persists signals to `results/position_cache.json` for tracking entries
+- **`src/optionscanner/position_cache.py`**: Persists signals to `results/position_cache.json` for tracking entries
 - Evaluates exit rules (DTE thresholds, strike breaches) and writes recommendations to `results/exits_*.csv`
 
 ## Configuration
@@ -169,8 +173,9 @@ indicator_processor.register("ma50", TechnicalIndicatorProcessor.simple_moving_a
 
 ## Directories
 
-- `strategies/`: Strategy implementations
-- `portfolio/`: Risk management (greeks, rules, playbooks)
+- `src/optionscanner/`: Main package code
+- `src/optionscanner/strategies/`: Strategy implementations
+- `src/optionscanner/portfolio/`: Risk management (greeks, rules, playbooks)
 - `tests/`: Unit and integration tests
 - `results/`: Generated signals, exit recommendations, position cache
 - `data/`: Parquet snapshots from live runs

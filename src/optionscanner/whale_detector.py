@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from loguru import logger
 
-from reddit_monitor import RedditPost, RedditComment
+from optionscanner.reddit_monitor import RedditPost, RedditComment
 
 
 class WhaleDirection(str, Enum):

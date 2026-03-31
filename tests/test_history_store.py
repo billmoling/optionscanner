@@ -4,8 +4,8 @@ import pytest
 from pathlib import Path
 from datetime import datetime, timezone
 
-from strategies.base import TradeSignal
-from data.history import HistoryStore, SignalOutcome
+from optionscanner.strategies.base import TradeSignal
+from optionscanner.data.history import HistoryStore, SignalOutcome
 
 
 class TestHistoryStore:

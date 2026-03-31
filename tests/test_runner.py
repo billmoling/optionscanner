@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 import pandas as pd
 import pytest
 
-from option_data import OptionChainSnapshot
-from runner import run_once
-from strategies.base import TradeSignal
+from optionscanner.option_data import OptionChainSnapshot
+from optionscanner.runner import run_once
+from optionscanner.strategies.base import TradeSignal
 
 
 class DummyFetcher:

@@ -10,8 +10,8 @@ from typing import Callable, Dict, Iterable, List, Mapping, Optional
 
 from loguru import logger
 
-from option_data import OptionChainSnapshot
-from strategies.base import TradeSignal
+from optionscanner.option_data import OptionChainSnapshot
+from optionscanner.strategies.base import TradeSignal
 
 ExitEvaluator = Callable[["CachedPosition", OptionChainSnapshot, datetime], Optional[str]]
 

@@ -1,7 +1,7 @@
 # tests/test_regime_detector.py
 import pytest
 from datetime import datetime, timezone
-from regime.detector import RegimeDetector, RegimeType, RegimeResult
+from optionscanner.regime.detector import RegimeDetector, RegimeType, RegimeResult
 
 
 class TestRegimeDetector:

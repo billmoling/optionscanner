@@ -10,12 +10,12 @@ from typing import Dict, Iterable, List, Optional
 from loguru import logger
 
 try:
-    from gemini_client_v2 import GeminiClientV2 as GeminiClient, GeminiClientError
+    from optionscanner.gemini_client_v2 import GeminiClientV2 as GeminiClient, GeminiClientError
 except ImportError:
-    from gemini_client import GeminiClient, GeminiClientError  # type: ignore
+    from optionscanner.gemini_client import GeminiClient, GeminiClientError  # type: ignore
 
-from option_data import OptionChainSnapshot
-from strategies.base import TradeSignal
+from optionscanner.option_data import OptionChainSnapshot
+from optionscanner.strategies.base import TradeSignal
 
 
 @dataclass(slots=True)
