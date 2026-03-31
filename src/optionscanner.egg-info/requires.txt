@@ -1,0 +1,15 @@
+nautilus_trader
+pandas
+ib_async
+loguru
+pyyaml
+google-genai
+python-dotenv
+numpy
+pyarrow
+praw
+requests
+
+[dev]
+pytest
+pytest-asyncio

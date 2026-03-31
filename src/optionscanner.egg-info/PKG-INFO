@@ -1,0 +1,21 @@
+Metadata-Version: 2.4
+Name: optionscanner
+Version: 0.1.0
+Summary: Options trading scanner and signal generator
+Requires-Python: >=3.12
+License-File: LICENSE
+Requires-Dist: nautilus_trader
+Requires-Dist: pandas
+Requires-Dist: ib_async
+Requires-Dist: loguru
+Requires-Dist: pyyaml
+Requires-Dist: google-genai
+Requires-Dist: python-dotenv
+Requires-Dist: numpy
+Requires-Dist: pyarrow
+Requires-Dist: praw
+Requires-Dist: requests
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-asyncio; extra == "dev"
+Dynamic: license-file

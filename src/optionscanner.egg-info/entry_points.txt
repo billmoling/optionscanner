@@ -1,0 +1,2 @@
+[console_scripts]
+optionscanner = optionscanner.main:main
