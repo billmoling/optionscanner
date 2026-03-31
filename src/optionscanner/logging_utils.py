@@ -50,7 +50,11 @@ def configure_logging(
     logger.remove()
 
     # Add patch to ensure 'component' key always exists in extra
-    logger.patch(lambda record: record["extra"].setdefault("component", "app"))
+    def _ensure_component(record: Dict[str, Any]) -> None:
+        if "component" not in record["extra"]:
+            record["extra"]["component"] = "app"
+
+    logger.patch(_ensure_component)
 
     # Console sink with structured format
     logger.add(
