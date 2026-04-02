@@ -49,12 +49,13 @@ def configure_logging(
 
     logger.remove()
 
-    # Add patch to ensure 'component' key always exists in extra
+    # Configure logger with patcher to ensure 'component' field always exists in extra
+    # This must use logger.configure() to affect the global logger instance
     def _ensure_component(record: Dict[str, Any]) -> None:
         if "component" not in record["extra"]:
             record["extra"]["component"] = "app"
 
-    logger.patch(_ensure_component)
+    logger.configure(patcher=_ensure_component)
 
     # Console sink with structured format
     logger.add(
