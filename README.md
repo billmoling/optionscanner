@@ -291,3 +291,58 @@ The test will:
 3. Write a fresh `results/signals_YYYYMMDD_HHMMSS.csv` and copy the newest run to `results/signals_localtest.csv`.
 
 The test skips automatically when `pyarrow` is missing or no history CSVs are available. After it passes, inspect `results/signals_localtest.csv` to review the combined output for tuning.
+
+## Testing in Docker
+
+To run tests in the same environment as production (Raspberry Pi deployment), execute pytest inside the Docker container:
+
+```bash
+# Rebuild and run tests in Docker
+docker-compose build app
+docker-compose run --rm app pytest -v
+```
+
+### Run specific tests in Docker
+
+```bash
+# Run a specific test module
+docker-compose run --rm app pytest tests/test_ai_agents.py -v
+
+# Run tests with keyword filter
+docker-compose run --rm app pytest tests/test_strategies.py -k "VerticalSpread" -v
+
+# Run all tests including expensive ones (costs API tokens)
+docker-compose run --rm app pytest -m 'expensive or not expensive' -v
+```
+
+### Debug inside the container
+
+For interactive debugging or to run multiple commands without rebuilding:
+
+```bash
+# Start an interactive shell in the container
+docker-compose run --rm app /bin/bash
+
+# Then run commands inside the container:
+# (venv) root@container:/app# pytest -v
+# (venv) root@container:/app# python -m optionscanner.main --help
+```
+
+### Verify environment inside Docker
+
+```bash
+# Check Python version and installed packages
+docker-compose run --rm app python --version
+docker-compose run --rm app pip list
+
+# Check environment variables (ensure .env is loaded)
+docker-compose run --rm app env | grep -E "IBKR|GEMINI|SLACK"
+```
+
+### Notes
+
+- The Docker image uses Python 3.12.12 (ARM64) and installs the package in editable mode
+- Tests run with the same dependencies and configuration as production
+- The `.env` file is automatically loaded by docker-compose
+- Use `--rm` to clean up containers after each test run
+- Expensive tests (Gemini API calls) are skipped by default unless explicitly enabled
