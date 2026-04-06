@@ -93,9 +93,9 @@ jobs:
           TRADING_MODE=${{ secrets.TRADING_MODE }}
           VNC_SERVER_PASSWORD=${{ secrets.VNC_SERVER_PASSWORD }}
           READ_ONLY_API=${{ secrets.READ_ONLY_API }}
-          IBKR_HOST=127.0.0.1
-          IBKR_PORT=4002
-          IBKR_CLIENT_ID=1
+          IBKR_HOST=${{ secrets.IBKR_HOST }}
+          IBKR_PORT=${{ secrets.IBKR_PORT }}
+          IBKR_CLIENT_ID=${{ secrets.IBKR_CLIENT_ID }}
           SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_TEST_CHANNEL=${{ secrets.SLACK_TEST_CHANNEL }}
           GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
