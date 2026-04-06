@@ -222,8 +222,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     portfolio_settings.setdefault("enable_gemini", enable_gemini)
     if "slack" not in portfolio_settings and config.get("slack"):
         portfolio_settings["slack"] = config.get("slack")
-    host = ibkr_settings.get("host") or os.getenv("IBKR_HOST", "127.0.0.1")
-    port = ibkr_settings.get("port") or os.getenv("IBKR_PORT")
+    host = ibkr_settings.get("host") or os.getenv("IBKR_HOST", "ib-gateway")
+    port = ibkr_settings.get("port") or os.getenv("IBKR_PORT", 4004)
     client_id = ibkr_settings.get("client_id") or os.getenv("IBKR_CLIENT_ID", 1)
     disable_portfolio_manager = (
         os.getenv("DISABLE_PORTFOLIO_MANAGER", "").strip().lower() in {"1", "true", "yes", "on"}
