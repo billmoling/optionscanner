@@ -45,13 +45,25 @@ def _resolve_gateway_endpoint() -> tuple[str, int]:
     return host, default_port
 
 
+def _get_client_id() -> int:
+    """Get client ID from environment, with fallback to default of 1."""
+    client_id_str = os.getenv("IAPI_CLIENT_ID") or os.getenv("IBKR_CLIENT_ID")
+    if not client_id_str:
+        return 1
+    try:
+        return int(client_id_str)
+    except ValueError:
+        log.warning("Invalid IAPI_CLIENT_ID '%s', defaulting to 1", client_id_str)
+        return 1
+
+
 @unittest.skipUnless(
     _is_ibkr_gateway_configured(), "IBKR gateway settings not provided; skipping integration test."
 )
 class IBKRMarketDataIntegrationTest(unittest.TestCase):
     def test_fetches_nvda_price(self) -> None:
         host, port = _resolve_gateway_endpoint()
-        client_id = int(os.getenv("IAPI_CLIENT_ID", "1"))
+        client_id = _get_client_id()
         market_data_type = os.getenv("IBKR_MARKET_DATA_TYPE", "FROZEN").upper()
         if market_data_type not in MARKET_DATA_TYPE_CODES:
             raise ValueError("IBKR_MARKET_DATA_TYPE must be 'LIVE' or 'FROZEN'")
