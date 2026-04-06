@@ -739,14 +739,19 @@ class TestPositionEvaluator:
 
     def test_evaluator_hold_recommendation(self):
         """Hold when no rules triggered."""
+        from datetime import date, timedelta
+
         # Use expiry > 14 days away to avoid roll trigger (roll_dte_min=14)
-        # Current date in CI is 2026-04-06, so use 2026-05-01 (25 days away)
+        # Using relative date ensures test remains valid as time passes
+        expiry_date = date.today() + timedelta(days=30)
+        expiry_str = expiry_date.strftime("%Y-%m-%d")
+
         group = PositionGroup.from_legs(
             [
                 pd.Series(
                     {
                         "underlying": "AAPL",
-                        "expiry": "2026-05-01",
+                        "expiry": expiry_str,
                         "right": "C",
                         "strike": 150.0,
                         "quantity": -1.0,
@@ -770,13 +775,19 @@ class TestPositionEvaluator:
 
     def test_evaluator_sell_profit_target(self):
         """Sell when profit target reached (80%+)."""
+        from datetime import date, timedelta
+
         # Credit spread: sold at 5.0, now worth 1.0 = 80% profit
+        # Use relative date to ensure test remains valid as time passes
+        expiry_date = date.today() + timedelta(days=30)
+        expiry_str = expiry_date.strftime("%Y-%m-%d")
+
         group = PositionGroup.from_legs(
             [
                 pd.Series(
                     {
                         "underlying": "AAPL",
-                        "expiry": "2026-04-17",
+                        "expiry": expiry_str,
                         "right": "C",
                         "strike": 150.0,
                         "quantity": -1.0,
@@ -800,15 +811,21 @@ class TestPositionEvaluator:
 
     def test_evaluator_stop_loss(self):
         """Stop loss when loss exceeds 200%."""
+        from datetime import date, timedelta
+
         # Credit position: sold at 5.0, now worth 15.0 (loss on short)
         # PnL = (5 - 15) * -1 * 100 = -1000 (loss)
         # PnL% = -1000 / 500 = -2.0 = -200%
+        # Use relative date to ensure test remains valid as time passes
+        expiry_date = date.today() + timedelta(days=30)
+        expiry_str = expiry_date.strftime("%Y-%m-%d")
+
         group = PositionGroup.from_legs(
             [
                 pd.Series(
                     {
                         "underlying": "AAPL",
-                        "expiry": "2026-04-17",
+                        "expiry": expiry_str,
                         "right": "C",
                         "strike": 150.0,
                         "quantity": -1.0,
@@ -867,12 +884,18 @@ class TestPositionEvaluator:
 
     def test_evaluator_result_contains_rationale(self):
         """Evaluation result should contain rationale."""
+        from datetime import date, timedelta
+
+        # Use relative date to ensure test remains valid as time passes
+        expiry_date = date.today() + timedelta(days=30)
+        expiry_str = expiry_date.strftime("%Y-%m-%d")
+
         group = PositionGroup.from_legs(
             [
                 pd.Series(
                     {
                         "underlying": "AAPL",
-                        "expiry": "2026-04-17",
+                        "expiry": expiry_str,
                         "right": "C",
                         "strike": 150.0,
                         "quantity": -1.0,
@@ -897,12 +920,18 @@ class TestPositionEvaluator:
 
     def test_evaluator_config_custom_thresholds(self):
         """Evaluator should accept custom thresholds."""
+        from datetime import date, timedelta
+
+        # Use relative date to ensure test remains valid as time passes
+        expiry_date = date.today() + timedelta(days=30)
+        expiry_str = expiry_date.strftime("%Y-%m-%d")
+
         group = PositionGroup.from_legs(
             [
                 pd.Series(
                     {
                         "underlying": "AAPL",
-                        "expiry": "2026-04-17",
+                        "expiry": expiry_str,
                         "right": "C",
                         "strike": 150.0,
                         "quantity": -1.0,
@@ -956,9 +985,14 @@ class TestRollRecommender:
 
     def test_roll_recommender_elevated_delta(self):
         """Roll recommendation when short delta is elevated."""
+        from datetime import date, timedelta
+
+        # Use relative date to ensure test remains valid as time passes
+        future_expiry = date.today() + timedelta(days=30)
+
         group = PositionGroup.from_legs([
             pd.Series({
-                "underlying": "AAPL", "expiry": "2026-04-17", "right": "C",
+                "underlying": "AAPL", "expiry": future_expiry.isoformat(), "right": "C",
                 "strike": 150.0, "quantity": -1.0, "avg_price": 5.0,
                 "market_price": 8.0, "sec_type": "OPT", "multiplier": 100.0,
                 "delta": -0.55,  # Elevated delta
@@ -966,16 +1000,21 @@ class TestRollRecommender:
         ], group_id="test")
 
         recommender = RollRecommender()
-        roll_rec = recommender.recommend_roll(group, current_dte=23)
+        roll_rec = recommender.recommend_roll(group, current_dte=30)
 
         assert roll_rec.should_roll is True
         assert "delta" in roll_rec.rationale.lower()
 
     def test_roll_recommender_no_roll_needed(self):
         """No roll recommendation when position is fine."""
+        from datetime import date, timedelta
+
+        # Use relative date to ensure test remains valid as time passes
+        future_expiry = date.today() + timedelta(days=30)
+
         group = PositionGroup.from_legs([
             pd.Series({
-                "underlying": "AAPL", "expiry": "2026-04-17", "right": "C",
+                "underlying": "AAPL", "expiry": future_expiry.isoformat(), "right": "C",
                 "strike": 150.0, "quantity": -1.0, "avg_price": 5.0,
                 "market_price": 4.0, "sec_type": "OPT", "multiplier": 100.0,
                 "delta": -0.2,  # Low delta
@@ -983,7 +1022,7 @@ class TestRollRecommender:
         ], group_id="test")
 
         recommender = RollRecommender()
-        roll_rec = recommender.recommend_roll(group, current_dte=23)
+        roll_rec = recommender.recommend_roll(group, current_dte=30)
 
         assert roll_rec.should_roll is False
         assert roll_rec.rationale == "No roll triggers met"
