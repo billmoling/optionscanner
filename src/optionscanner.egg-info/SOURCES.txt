@@ -71,7 +71,6 @@ tests/test_ai_agents_integration.py
 tests/test_execution_integration.py
 tests/test_exit_config.py
 tests/test_flow.py
-tests/test_gemini_call.py
 tests/test_history_store.py
 tests/test_ibkr_integration.py
 tests/test_ibkr_options_integration.py
