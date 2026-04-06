@@ -739,12 +739,14 @@ class TestPositionEvaluator:
 
     def test_evaluator_hold_recommendation(self):
         """Hold when no rules triggered."""
+        # Use expiry > 14 days away to avoid roll trigger (roll_dte_min=14)
+        # Current date in CI is 2026-04-06, so use 2026-05-01 (25 days away)
         group = PositionGroup.from_legs(
             [
                 pd.Series(
                     {
                         "underlying": "AAPL",
-                        "expiry": "2026-04-17",
+                        "expiry": "2026-05-01",
                         "right": "C",
                         "strike": 150.0,
                         "quantity": -1.0,
