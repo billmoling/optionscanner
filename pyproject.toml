@@ -19,6 +19,7 @@ dependencies = [
     "pyarrow",
     "praw",
     "requests",
+    "python-logging-loki",
 ]
 
 [project.optional-dependencies]
