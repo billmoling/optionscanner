@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from ib_async import IB, Stock
 
+from optionscanner.market_hours import MarketHoursChecker
 from optionscanner.option_data import MARKET_DATA_TYPE_CODES
 
 logging.basicConfig(
@@ -57,6 +58,26 @@ def _get_client_id() -> int:
         return 1
 
 
+def _resolve_market_data_type(requested_type: str) -> str:
+    """Resolve the market data type, handling AUTO mode.
+
+    Args:
+        requested_type: The requested market data type (LIVE, FROZEN, or AUTO).
+
+    Returns:
+        The resolved market data type (LIVE or FROZEN).
+    """
+    if requested_type.upper() == "AUTO":
+        checker = MarketHoursChecker()
+        resolved = checker.get_market_data_type()
+        log.info(
+            "AUTO market data type resolved to %s",
+            resolved,
+        )
+        return resolved
+    return requested_type.upper()
+
+
 @unittest.skipUnless(
     _is_ibkr_gateway_configured(), "IBKR gateway settings not provided; skipping integration test."
 )
@@ -64,9 +85,12 @@ class IBKRMarketDataIntegrationTest(unittest.TestCase):
     def test_fetches_nvda_price(self) -> None:
         host, port = _resolve_gateway_endpoint()
         client_id = _get_client_id()
-        market_data_type = os.getenv("IBKR_MARKET_DATA_TYPE", "FROZEN").upper()
-        if market_data_type not in MARKET_DATA_TYPE_CODES:
-            raise ValueError("IBKR_MARKET_DATA_TYPE must be 'LIVE' or 'FROZEN'")
+        market_data_type_raw = os.getenv("IBKR_MARKET_DATA_TYPE", "FROZEN").upper()
+        # Resolve AUTO mode to actual type
+        market_data_type = _resolve_market_data_type(market_data_type_raw)
+
+        if market_data_type not in MARKET_DATA_TYPE_CODES or MARKET_DATA_TYPE_CODES.get(market_data_type) is None:
+            raise ValueError("IBKR_MARKET_DATA_TYPE must be 'LIVE', 'FROZEN', or 'AUTO'")
 
         ib = IB()
         try:
@@ -93,7 +117,7 @@ class IBKRMarketDataIntegrationTest(unittest.TestCase):
         self.assertGreater(price, 0.0, "Expected NVDA price to be positive.")
         log.info(
             f"NVDA price: {price:.2f} captured at {timestamp.isoformat()} "
-            f"using {market_data_type} market data."
+            f"using {market_data_type} market data (requested: {market_data_type_raw})."
         )
 
 

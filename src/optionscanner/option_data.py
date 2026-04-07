@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 MARKET_DATA_TYPE_CODES = {
     "LIVE": 1,
     "FROZEN": 2,
+    "AUTO": None,  # Resolved at runtime based on market hours
 }
 MARKET_DATA_CODE_TO_NAME = {code: name for name, code in MARKET_DATA_TYPE_CODES.items()}
 
@@ -95,6 +96,11 @@ class IBKRDataFetcher(BaseDataFetcher):
             raise ValueError(
                 f"Unsupported market data type '{market_data_type}'. "
                 f"Choose one of {sorted(MARKET_DATA_TYPE_CODES)}."
+            )
+        if self.market_data_type == "AUTO":
+            raise ValueError(
+                "AUTO market data type must be resolved before creating IBKRDataFetcher. "
+                "Use MarketHoursChecker.get_market_data_type() or resolve_market_data_type()."
             )
 
         self._market_data_type_code = MARKET_DATA_TYPE_CODES[self.market_data_type]

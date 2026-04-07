@@ -24,6 +24,7 @@ from optionscanner.execution import (
     TradeExecutionConfig,
     TradeExecutor,
 )
+from optionscanner.market_hours import MarketHoursChecker
 from optionscanner.notifications import SlackNotifier
 from optionscanner.option_data import IBKRDataFetcher, MARKET_DATA_TYPE_CODES
 from optionscanner.portfolio.manager import PortfolioManager
@@ -129,7 +130,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--market-data",
         choices=sorted(MARKET_DATA_TYPE_CODES.keys()),
         default="LIVE",
-        help="Market data type requested from IBKR when using live data fetchers (LIVE or FROZEN).",
+        help="Market data type requested from IBKR when using live data fetchers (LIVE, FROZEN, or AUTO). "
+             "AUTO automatically selects LIVE during market hours (6:30 AM - 1:00 PM PT weekdays) "
+             "and FROZEN outside market hours.",
     )
     parser.add_argument(
         "--config",
@@ -143,6 +146,28 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Run only the portfolio management workflow and skip signal generation.",
     )
     return parser.parse_args(argv)
+
+
+def resolve_market_data_type(requested_type: str) -> str:
+    """Resolve the market data type, handling AUTO mode.
+
+    Args:
+        requested_type: The requested market data type (LIVE, FROZEN, or AUTO).
+
+    Returns:
+        The resolved market data type (LIVE or FROZEN).
+    """
+    if requested_type.upper() == "AUTO":
+        checker = MarketHoursChecker()
+        resolved = checker.get_market_data_type()
+        logger.info(
+            "AUTO market data type resolved to {resolved}",
+            resolved=resolved,
+            component="main",
+            event_type="market_data_auto_resolve",
+        )
+        return resolved
+    return requested_type.upper()
 
 
 def execute_portfolio_manager(
@@ -245,12 +270,15 @@ def main(argv: Optional[List[str]] = None) -> None:
         logger.warning("Invalid client_id '%s', defaulting to 1", client_id)
         client_id_int = 1
 
+    # Resolve market data type (handles AUTO mode)
+    resolved_market_data = resolve_market_data_type(args.market_data)
+
     fetcher = IBKRDataFetcher(
         host=host,
         port=int(port),
         client_id=client_id_int,
         data_dir=data_dir,
-        market_data_type=args.market_data,
+        market_data_type=resolved_market_data,
     )
     if trade_exec_config.enabled:
         trade_executor = TradeExecutor(fetcher.ib, trade_exec_config, slack_notifier)
@@ -270,11 +298,14 @@ def main(argv: Optional[List[str]] = None) -> None:
             client_id_offset = int(stock_data_settings.get("client_id_offset", 50))
             stock_client_id = base_client_id + client_id_offset
         history_dir_setting = stock_data_settings.get("history_dir")
+        # Resolve market data type for stock fetcher (handles AUTO mode)
+        stock_market_data_raw = stock_data_settings.get("market_data_type", args.market_data)
+        stock_market_data = resolve_market_data_type(stock_market_data_raw)
         stock_fetcher = StockDataFetcher(
             host=stock_host,
             port=stock_port,
             client_id=int(stock_client_id),
-            market_data_type=stock_data_settings.get("market_data_type", args.market_data),
+            market_data_type=stock_market_data,
             exchange=stock_data_settings.get("exchange", "SMART"),
             currency=stock_data_settings.get("currency", "USD"),
             history_dir=Path(history_dir_setting) if history_dir_setting else None,

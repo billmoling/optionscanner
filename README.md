@@ -96,7 +96,7 @@ The process stays alive; ensure your Docker container remains running to honor t
 | --- | --- |
 | `--run-mode {local,schedule}` | Select the execution mode (single run or scheduled loop). |
 | `--config PATH` | Path to the YAML configuration file (defaults to `config.yaml`). |
-| `--market-data TYPE` | IBKR market data type (`LIVE` or `FROZEN`). |
+| `--market-data TYPE` | IBKR market data type (`LIVE`, `FROZEN`, or `AUTO`). `AUTO` automatically selects `LIVE` during market hours (6:30 AM - 1:00 PM PT weekdays) and `FROZEN` outside market hours. |
 | `--portfolio-only` | Skip signal generation and run only the portfolio manager workflow. |
 
 ### Portfolio-only mode
@@ -259,7 +259,7 @@ Start the IBKR Gateway via Docker Compose (for example, `docker compose up -d ib
 python -m unittest tests.test_ibkr_integration
 ```
 
-The test connects to the gateway, requests the NVDA stock price over live or frozen market data, and prints the captured quote. Override the default connection settings with `IBKR_HOST`, `IBKR_PORT`, or `IBKR_MARKET_DATA_TYPE` if needed. The port automatically follows `TRADING_MODE` (`4002` for paper, `4001` for live) unless `IBKR_PORT` is provided.
+The test connects to the gateway, requests the NVDA stock price over live or frozen market data, and prints the captured quote. Override the default connection settings with `IBKR_HOST`, `IBKR_PORT`, or `IBKR_MARKET_DATA_TYPE` if needed. Set `IBKR_MARKET_DATA_TYPE=AUTO` to automatically use `LIVE` during market hours (6:30 AM - 1:00 PM PT weekdays) and `FROZEN` outside market hours. The port automatically follows `TRADING_MODE` (`4002` for paper, `4001` for live) unless `IBKR_PORT` is provided.
 
 If you also want to confirm option-chain access end-to-end, run:
 
