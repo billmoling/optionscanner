@@ -224,7 +224,13 @@ def main(argv: Optional[List[str]] = None) -> None:
         portfolio_settings["slack"] = config.get("slack")
     host = ibkr_settings.get("host") or os.getenv("IBKR_HOST", "ib-gateway")
     port = ibkr_settings.get("port") or os.getenv("IBKR_PORT", 4004)
-    client_id = ibkr_settings.get("client_id") or os.getenv("IBKR_CLIENT_ID", 1)
+
+    # Get client ID with fallback chain: config > env var > default of 1
+    client_id = ibkr_settings.get("client_id")
+    if client_id is None:
+        client_id_env = os.getenv("IBKR_CLIENT_ID") or os.getenv("IAPI_CLIENT_ID") or ""
+        client_id = client_id_env.strip() or "1"
+
     disable_portfolio_manager = (
         os.getenv("DISABLE_PORTFOLIO_MANAGER", "").strip().lower() in {"1", "true", "yes", "on"}
     )
@@ -232,10 +238,17 @@ def main(argv: Optional[List[str]] = None) -> None:
     if port is None:
         raise ValueError("IBKR port is not configured. Set 'ibkr.port' in the configuration.")
 
+    # Validate and convert client_id to int
+    try:
+        client_id_int = int(client_id)
+    except ValueError:
+        logger.warning("Invalid client_id '%s', defaulting to 1", client_id)
+        client_id_int = 1
+
     fetcher = IBKRDataFetcher(
         host=host,
         port=int(port),
-        client_id=int(client_id),
+        client_id=client_id_int,
         data_dir=data_dir,
         market_data_type=args.market_data,
     )
@@ -251,7 +264,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     if stock_data_settings.get("enabled"):
         stock_host = stock_data_settings.get("host", host)
         stock_port = int(stock_data_settings.get("port", port))
-        base_client_id = int(client_id)
+        base_client_id = client_id_int
         stock_client_id = stock_data_settings.get("client_id")
         if stock_client_id is None:
             client_id_offset = int(stock_data_settings.get("client_id_offset", 50))
