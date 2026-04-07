@@ -9,6 +9,7 @@ numpy
 pyarrow
 praw
 requests
+python-logging-loki
 
 [dev]
 pytest
