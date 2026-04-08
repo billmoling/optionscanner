@@ -174,36 +174,23 @@ class SlackNotifier:
         # AI Picks section
         if ai_selections:
             lines.append("*-- AI Top Picks --*")
-            lines.append("| # | Symbol | Direction | Strategy | AI Reason |")
-            lines.append("|---|----------|-----------|------------------|------------|")
 
             for idx, (strategy_name, signal) in enumerate(ai_selections, start=1):
                 direction = signal.direction.replace("_", " ").title()
                 signal_id = f"{signal.symbol}_{strategy_name}"
                 ai_reason = ai_reasons.get(signal_id, "AI selected")
-                # Truncate reason if too long
-                if len(ai_reason) > 60:
-                    ai_reason = ai_reason[:57] + "..."
-                lines.append(
-                    f"| {idx} | {signal.symbol} | {direction} | "
-                    f"{strategy_name.replace('Strategy', '')} | {ai_reason} |"
-                )
+                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}")
+                lines.append(f"  _Reason_: {ai_reason}")
             lines.append("")
 
         # Quantitative Picks section
         if quant_picks:
             lines.append("*-- Quantitative Top Picks --*")
-            lines.append("| # | Symbol | Direction | Strategy | Score | Reason |")
-            lines.append("|---|----------|-----------|------------------|-------|--------|")
 
             for idx, score in enumerate(quant_picks, start=1):
                 direction = score.signal.direction.replace("_", " ").title()
-                reason_short = score.reason[:50] + "..." if len(score.reason) > 50 else score.reason
-                lines.append(
-                    f"| {idx} | {score.signal.symbol} | {direction} | "
-                    f"{score.strategy_name.replace('Strategy', '')} | "
-                    f"{score.composite_score:.2f} | {reason_short} |"
-                )
+                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}")
+                lines.append(f"  _Reason_: {score.reason}")
 
         # Footer
         if csv_path:
@@ -236,19 +223,11 @@ class SlackNotifier:
                 lines.extend(context_lines)
                 lines.append("")
 
-        # Table header
-        lines.append("| # | Symbol | Direction | Strategy | Score | Reason |")
-        lines.append("|---|----------|-----------|------------------|-------|--------|")
-
-        # Ranked signals
+        # Ranked signals - use list format for better readability
         for idx, score in enumerate(ranked_signals, start=1):
             direction = score.signal.direction.replace("_", " ").title()
-            reason_short = score.reason[:50] + "..." if len(score.reason) > 50 else score.reason
-            lines.append(
-                f"| {idx} | {score.signal.symbol} | {direction} | "
-                f"{score.strategy_name.replace('Strategy', '')} | "
-                f"{score.composite_score:.2f} | {reason_short} |"
-            )
+            lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}")
+            lines.append(f"  _Reason_: {score.reason}")
 
         # Footer
         if csv_path:
