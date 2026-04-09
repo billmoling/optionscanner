@@ -20,6 +20,7 @@ dependencies = [
     "praw",
     "requests",
     "python-logging-loki",
+    "scipy",
 ]
 
 [project.optional-dependencies]
