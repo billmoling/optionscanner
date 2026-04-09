@@ -8,53 +8,53 @@
 
 ## Overview
 
-本设计文档描述了在 optionscanner 平台中新增 **WheelStrategy** 模块的完整规格，专门用于扫描和交易 **Cash-Secured Put（现金担保卖权）** 机会。该策略通过卖出虚值 Put 期权收取权利金，目标是在不被行权的前提下赚取时间价值衰减收益。
+This design specification describes the complete requirements for adding the **WheelStrategy** module to the optionscanner platform, specifically for scanning and trading **Cash-Secured Put (CSP)** opportunities. The strategy sells out-of-the-money put options to collect premiums, aiming to earn time value decay returns without being assigned.
 
-### 设计目标
+### Design Goals
 
-1. **纯 Sell Put 策略** - 实现现金担保卖权（CSP）扫描，不自动行权持股
-2. **超短期到期日** - 聚焦 0-15 天到期的期权，最大化时间价值衰减速率
-3. **量化筛选** - 应用 IV Rank、成交量、年化 ROI、OTM 概率四重过滤
-4. **概率分析** - 基于 Black-Scholes 模型计算不被行权概率
-5. **可扩展扫描框架** - 模块化设计，支持未来添加其他扫描策略
+1. **Pure Sell Put Strategy** - Implement cash-secured put scanning without automatic stock assignment
+2. **Ultra-Short Expiry** - Focus on 0-15 days to expiry options to maximize theta decay rate
+3. **Quantitative Filtering** - Apply four-stage filtering: IV Rank, Volume, Annualized ROI, OTM Probability
+4. **Probability Analysis** - Calculate probability of expiring OTM using Black-Scholes model
+5. **Extensible Scanner Framework** - Modular design supporting future scanner strategies
 
-### 非目标
+### Non-Goals
 
-- 完整的 Wheel 循环（持股后 Sell Covered Call）
-- 自动行权或股票买入逻辑
-- 修改现有 PutCreditSpreadStrategy
-- 替换 IBKR 数据获取层
+- Full Wheel cycle (Sell Covered Call after stock assignment)
+- Automatic assignment or stock purchase logic
+- Modifying existing PutCreditSpreadStrategy
+- Replacing IBKR data fetch layer
 
 ---
 
-## 案例学习：AI 期权扫描最佳实践
+## Case Study: AI Options Scanning Best Practices
 
-基于用户分享的 AI Sell Put 扫描案例，提取以下核心特性：
+Based on the user's shared AI Sell Put scanning case, extract the following core features:
 
-| 特性 | 案例实现 | 本设计采用 |
-|------|---------|-----------|
-| 自选股扫描 | 12 只股票（NVDA、AAPL、SPY、TQQQ、SOXL 等） | 复用 config.yaml tickers |
-| 到期日覆盖 | 0-45 天内 10 个日期 | 0-15 天，所有可用到期日 |
-| IV 筛选 | IV ≥ 30% | IV Rank ≥ 30% |
-| 成交量筛选 | 成交量 ≥ 500 张 | 成交量 ≥ 500 且 OI ≥ 1000 |
-| 年化 ROI | 目标 ≥ 30% | 年化 ROI ≥ 30% |
-| 概率计算 | Black-Scholes OTM 概率 ≥ 60% | 完全采用 |
-| 输出格式 | Excel 4 工作表 | CSV + Slack 增强通知 |
+| Feature | Case Implementation | This Design |
+|---------|--------------------|-------------|
+| Watchlist Scanning | 12 stocks (NVDA, AAPL, SPY, TQQQ, SOXL, etc.) | Reuse config.yaml tickers |
+| Expiry Coverage | 10 dates within 0-45 days | 0-15 days, all available expiries |
+| IV Filter | IV ≥ 30% | IV Rank ≥ 30% |
+| Volume Filter | Volume ≥ 500 contracts | Volume ≥ 500 AND OI ≥ 1000 |
+| Annualized ROI | Target ≥ 30% | Annualized ROI ≥ 30% |
+| Probability Calculation | Black-Scholes OTM Probability ≥ 60% | Fully adopted |
+| Output Format | Excel 4 worksheets | CSV + Enhanced Slack notifications |
 
 ---
 
 ## Architecture
 
-### 模块依赖关系
+### Module Dependencies
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    WheelStrategy Module                          │
 ├─────────────────────────────────────────────────────────────────┤
-│  strategy_wheel.py          │  核心策略实现                      │
-│  scanners/put_scanner.py    │  通用扫描框架                      │
-│  analytics/bs_model.py      │  Black-Scholes 概率计算            │
-│  filters/options_filters.py │  IV/成交量/ROI筛选器               │
+│  strategy_wheel.py          │  Core strategy implementation     │
+│  scanners/put_scanner.py    │  Generic scanner framework        │
+│  analytics/bs_model.py      │  Black-Scholes probability calc   │
+│  filters/options_filters.py │  IV/Volume/ROI filters            │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                 ┌───────────────┴───────────────┐
@@ -65,45 +65,45 @@
                 └───────────────────────────────┘
 ```
 
-### 依赖顺序
+### Dependency Order
 
 ```
-1. analytics/bs_model.py      - 基础数学模型，无内部依赖
+1. analytics/bs_model.py      - Foundation math model, no internal deps
    ↓
-2. filters/options_filters.py - 依赖 bs_model 计算概率
+2. filters/options_filters.py - Depends on bs_model for probability
    ↓
-3. scanners/put_scanner.py    - 依赖 filters 进行筛选
+3. scanners/put_scanner.py    - Depends on filters for screening
    ↓
-4. strategy_wheel.py          - 依赖 scanner 生成信号
+4. strategy_wheel.py          - Depends on scanner for signals
 ```
 
 ---
 
-## Module 1: Black-Scholes 概率计算 (`analytics/bs_model.py`)
+## Module 1: Black-Scholes Model (`analytics/bs_model.py`)
 
-### 目的
+### Purpose
 
-实现 Black-Scholes 期权定价模型，计算期权的理论价格和不被行权概率。
+Implement the Black-Scholes option pricing model to calculate theoretical option prices and probability of expiring OTM.
 
-### 组件
+### Components
 
-#### BSModel 类
+#### BSModel Class
 
 ```python
 @dataclass(slots=True)
 class BSModel:
-    """Black-Scholes 期权定价和概率计算."""
+    """Black-Scholes option pricing and probability calculation."""
     
-    risk_free_rate: float = 0.05  # 无风险利率（年化）
+    risk_free_rate: float = 0.05  # Annual risk-free rate
     
     def calculate_d1_d2(
         self,
-        S: float,  # 标的价格
-        K: float,  # 行权价
-        T: float,  # 到期时间（年）
-        sigma: float,  # 隐含波动率
+        S: float,  # Underlying price
+        K: float,  # Strike price
+        T: float,  # Time to expiry (years)
+        sigma: float,  # Implied volatility
     ) -> Tuple[float, float]:
-        """计算 d1 和 d2 参数."""
+        """Calculate d1 and d2 parameters."""
         
     def calculate_option_price(
         self,
@@ -113,7 +113,7 @@ class BSModel:
         sigma: float,
         option_type: str,  # "CALL" or "PUT"
     ) -> float:
-        """计算期权理论价格."""
+        """Calculate theoretical option price."""
         
     def calculate_otm_probability(
         self,
@@ -124,61 +124,61 @@ class BSModel:
         option_type: str,
     ) -> float:
         """
-        计算期权不被行权（保持虚值）的概率.
+        Calculate probability of option expiring OTM.
         
-        对于 Put 期权：P(股价 > 行权价) = N(d2)
-        对于 Call 期权：P(股价 < 行权价) = N(-d2)
+        For Put options: P(stock > strike) = N(d2)
+        For Call options: P(stock < strike) = N(-d2)
         """
 ```
 
-### 配置参数
+### Configuration Parameters
 
 ```yaml
 # config.yaml
 black_scholes:
-  risk_free_rate: 0.05  # 5% 无风险利率
-  probability_threshold: 0.60  # OTM 概率 ≥ 60%
+  risk_free_rate: 0.05  # 5% risk-free rate
+  probability_threshold: 0.60  # OTM probability ≥ 60%
 ```
 
 ---
 
-## Module 2: 期权筛选器 (`filters/options_filters.py`)
+## Module 2: Options Filters (`filters/options_filters.py`)
 
-### 目的
+### Purpose
 
-实现可组合的期权筛选管道，支持多个筛选条件的灵活配置。
+Implement a composable option filter pipeline supporting flexible configuration of multiple screening criteria.
 
-### 组件
+### Components
 
-#### FilterResult 数据类
+#### FilterResult Dataclass
 
 ```python
 @dataclass(slots=True)
 class FilterResult:
-    """筛选结果."""
+    """Filter result."""
     
     passed: bool
     reason: str
-    metrics: Dict[str, Any]  # 包含 IV、volume、ROI、probability 等
+    metrics: Dict[str, Any]  # Contains IV, volume, ROI, probability, etc.
 ```
 
-#### 筛选器接口
+#### Filter Interface
 
 ```python
 class OptionFilter(abc.ABC):
-    """期权筛选器基类."""
+    """Base option filter class."""
     
     @abc.abstractmethod
     def check(self, option_data: Dict[str, Any], context: Dict[str, Any]) -> FilterResult:
-        """检查期权是否通过筛选."""
+        """Check if option passes the filter."""
 ```
 
-#### 具体筛选器实现
+#### Concrete Filter Implementations
 
 ```python
 @dataclass(slots=True)
 class IVRankFilter(OptionFilter):
-    """IV Rank 筛选器."""
+    """IV Rank filter."""
     min_iv_rank: float = 0.30  # ≥ 30%
     
     def check(self, option_data: Dict[str, Any], context: Dict[str, Any]) -> FilterResult:
@@ -190,7 +190,7 @@ class IVRankFilter(OptionFilter):
 
 @dataclass(slots=True)
 class VolumeFilter(OptionFilter):
-    """成交量和持仓量筛选器."""
+    """Volume and open interest filter."""
     min_volume: int = 500
     min_open_interest: int = 1000
     
@@ -204,7 +204,7 @@ class VolumeFilter(OptionFilter):
 
 @dataclass(slots=True)
 class AnnualizedROIFilter(OptionFilter):
-    """年化 ROI 筛选器."""
+    """Annualized ROI filter."""
     min_annualized_roi: float = 0.30  # ≥ 30%
     
     def check(self, option_data: Dict[str, Any], context: Dict[str, Any]) -> FilterResult:
@@ -216,7 +216,7 @@ class AnnualizedROIFilter(OptionFilter):
 
 @dataclass(slots=True)
 class OTMProbabilityFilter(OptionFilter):
-    """OTM 概率筛选器（基于 Black-Scholes）."""
+    """OTM probability filter (based on Black-Scholes)."""
     min_otm_probability: float = 0.60  # ≥ 60%
     bs_model: BSModel = field(default_factory=BSModel)
     
@@ -232,12 +232,12 @@ class OTMProbabilityFilter(OptionFilter):
         return FilterResult(passed=False, reason=f"OTM Probability {prob:.1%} < {self.min_otm_probability:.0%}")
 ```
 
-#### 筛选器管道
+#### Filter Pipeline
 
 ```python
 @dataclass(slots=True)
 class OptionFilterPipeline:
-    """筛选器管道，按顺序执行多个筛选器."""
+    """Filter pipeline that executes multiple filters sequentially."""
     
     filters: List[OptionFilter]
     
@@ -250,10 +250,10 @@ class OptionFilterPipeline:
         context: Dict[str, Any],
     ) -> Tuple[bool, List[str]]:
         """
-        执行所有筛选器.
+        Execute all filters.
         
         Returns:
-            (passed, reasons): 是否通过所有筛选，以及各筛选器的原因列表
+            (passed, reasons): Whether all filters passed, and list of reasons from each filter
         """
         reasons = []
         for f in self.filters:
@@ -266,118 +266,118 @@ class OptionFilterPipeline:
 
 ---
 
-## Module 3: Put Scanner 扫描器 (`scanners/put_scanner.py`)
+## Module 3: Put Scanner (`scanners/put_scanner.py`)
 
-### 目的
+### Purpose
 
-扫描所有可用期权合约，应用筛选管道，返回符合条件的 Sell Put 机会。
+Scan all available option contracts, apply the filter pipeline, and return qualifying Sell Put opportunities.
 
-### 组件
+### Components
 
-#### PutScanResult 数据类
+#### PutScanResult Dataclass
 
 ```python
 @dataclass(slots=True)
 class PutScanResult:
-    """Sell Put 扫描结果."""
+    """Sell Put scan result."""
     
     symbol: str
     expiry: datetime
     strike: float
     option_type: str  # "PUT"
     
-    # 市场数据
+    # Market data
     underlying_price: float
     option_bid: float
     iv_rank: float
     volume: int
     open_interest: int
     
-    # 计算指标
+    # Calculated metrics
     days_to_expiry: int
     annualized_roi: float
     otm_probability: float
     delta: float
     
-    # 筛选状态
+    # Filter status
     passed_filters: bool
     filter_reasons: List[str]
     
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典，用于输出或进一步处理."""
+        """Convert to dict for output or further processing."""
 ```
 
-#### PutScanner 类
+#### PutScanner Class
 
 ```python
 @dataclass(slots=True)
 class PutScanner:
-    """Sell Put 机会扫描器."""
+    """Sell Put opportunity scanner."""
     
     filter_pipeline: OptionFilterPipeline
     bs_model: BSModel = field(default_factory=BSModel)
     
-    # 配置参数
+    # Configuration parameters
     min_days_to_expiry: int = 0
     max_days_to_expiry: int = 15
-    min_strike_range_pct: float = 0.05  # 行权价需在标的价格下方 5% 以内
-    max_strike_range_pct: float = 0.20  # 行权价需在标的价格下方 20% 以外
+    min_strike_range_pct: float = 0.05  # Strike must be within 5% below underlying
+    max_strike_range_pct: float = 0.20  # Strike must be within 20% below underlying
     
     def scan(
         self,
         snapshot: OptionChainSnapshot,
     ) -> List[PutScanResult]:
         """
-        扫描单个股票的 Sell Put 机会.
+        Scan Sell Put opportunities for a single stock.
         
         Args:
-            snapshot: 期权链快照
+            snapshot: Option chain snapshot
         
         Returns:
-            符合条件的 Sell Put 机会列表
+            List of qualifying Sell Put opportunities
         """
         results = []
         underlying_price = snapshot.underlying_price
         
-        # 过滤 Put 期权
+        # Filter Put options
         puts = [opt for opt in snapshot.options if opt.get("option_type") == "PUT"]
         
         for option in puts:
-            # 计算到期天数
+            # Calculate days to expiry
             expiry = pd.to_datetime(option["expiry"], utc=True)
             days_to_expiry = (expiry - datetime.now(timezone.utc)).days
             
-            # 跳过不符合到期日范围的期权
+            # Skip options outside expiry range
             if days_to_expiry < self.min_days_to_expiry or days_to_expiry > self.max_days_to_expiry:
                 continue
             
-            # 计算行权价范围（虚值 Put：行权价 < 标的价格）
+            # Calculate strike range (OTM Put: strike < underlying price)
             strike = float(option["strike"])
             otm_pct = (underlying_price - strike) / underlying_price
             if otm_pct < self.min_strike_range_pct or otm_pct > self.max_strike_range_pct:
                 continue
             
-            # 计算年化 ROI
+            # Calculate annualized ROI
             premium = float(option.get("bid", option.get("mark", 0.0)))
-            collateral = strike  # 现金担保需要行权价金额
+            collateral = strike  # Cash-secured requires strike amount
             roi = premium / collateral if collateral > 0 else 0.0
             annualized_roi = roi * (365.0 / max(days_to_expiry, 1))
             
-            # 准备筛选上下文
+            # Prepare filter context
             context = {
                 "underlying_price": underlying_price,
                 "symbol": snapshot.symbol,
             }
             
-            # 更新 option 数据
+            # Update option data
             option["days_to_expiry"] = days_to_expiry
             option["annualized_roi"] = annualized_roi
             
-            # 执行筛选管道
+            # Execute filter pipeline
             passed, reasons = self.filter_pipeline.check_all(option, context)
             
             if passed:
-                # 计算 OTM 概率
+                # Calculate OTM probability
                 T = days_to_expiry / 365.0
                 sigma = option.get("implied_volatility", 0.3)
                 otm_prob = self.bs_model.calculate_otm_probability(
@@ -402,47 +402,47 @@ class PutScanner:
                     filter_reasons=reasons,
                 ))
         
-        # 按年化 ROI 降序排序
+        # Sort by annualized ROI descending
         results.sort(key=lambda r: r.annualized_roi, reverse=True)
         return results
 ```
 
 ---
 
-## Module 4: WheelStrategy 策略实现 (`strategies/strategy_wheel.py`)
+## Module 4: WheelStrategy Implementation (`strategies/strategy_wheel.py`)
 
-### 目的
+### Purpose
 
-将 Put Scanner 集成到策略框架中，生成可执行的 TradeSignal。
+Integrate the Put Scanner into the strategy framework to generate executable TradeSignals.
 
-### 配置参数
+### Configuration Parameters
 
 ```yaml
 # config.yaml
 strategies:
   WheelStrategy:
     params:
-      # 到期日范围
+      # Expiry range
       min_days_to_expiry: 0
       max_days_to_expiry: 15
       
-      # 筛选条件
+      # Screening criteria
       min_iv_rank: 0.30
       min_volume: 500
       min_open_interest: 1000
       min_annualized_roi: 0.30
       min_otm_probability: 0.60
       
-      # 行权价范围
+      # Strike range
       min_strike_range_pct: 0.05
       max_strike_range_pct: 0.20
       
-      # 其他
-      max_signals_per_symbol: 3  # 每个股票最多输出 3 个信号
+      # Other
+      max_signals_per_symbol: 3  # Max 3 signals per symbol
       published_win_rate: 0.65
 ```
 
-### 策略实现
+### Strategy Implementation
 
 ```python
 from optionscanner.strategies.base import BaseOptionStrategy, TradeSignal, SignalLeg
@@ -458,10 +458,10 @@ from optionscanner.analytics.bs_model import BSModel
 
 
 class WheelStrategy(BaseOptionStrategy):
-    """Cash-Secured Put 策略.
+    """Cash-Secured Put strategy.
     
-    卖出虚值 Put 期权，收取权利金，目标是在不被行权的前提下
-    赚取时间价值衰减收益。
+    Sells OTM put options to collect premium, aiming to earn
+    time value decay without being assigned.
     """
     
     def __init__(
@@ -484,7 +484,7 @@ class WheelStrategy(BaseOptionStrategy):
         self.max_signals_per_symbol = max_signals_per_symbol
         self.published_win_rate = published_win_rate
         
-        # 构建筛选器管道
+        # Build filter pipeline
         filters = [
             IVRankFilter(min_iv_rank=min_iv_rank),
             VolumeFilter(min_volume=min_volume, min_open_interest=min_open_interest),
@@ -493,7 +493,7 @@ class WheelStrategy(BaseOptionStrategy):
         ]
         self.filter_pipeline = OptionFilterPipeline(filters=filters)
         
-        # 初始化扫描器
+        # Initialize scanner
         self.scanner = PutScanner(
             filter_pipeline=self.filter_pipeline,
             min_days_to_expiry=min_days_to_expiry,
@@ -503,14 +503,14 @@ class WheelStrategy(BaseOptionStrategy):
         )
     
     def on_data(self, data: Iterable[Any]) -> List[TradeSignal]:
-        """处理期权链数据，生成 Sell Put 信号."""
+        """Process option chain data and generate Sell Put signals."""
         signals: List[TradeSignal] = []
         
         for snapshot in data:
-            # 扫描 Sell Put 机会
+            # Scan Sell Put opportunities
             results = self.scanner.scan(snapshot)
             
-            # 限制每个股票的信号数量
+            # Limit signals per symbol
             for result in results[: self.max_signals_per_symbol]:
                 signal = self._build_signal(result)
                 if signal:
@@ -519,7 +519,7 @@ class WheelStrategy(BaseOptionStrategy):
         return signals
     
     def _build_signal(self, result: PutScanResult) -> TradeSignal:
-        """构建 TradeSignal."""
+        """Build TradeSignal."""
         rationale = (
             f"Cash-Secured Put: sell {result.strike:.2f}P exp {result.expiry.strftime('%Y-%m-%d')} "
             f"premium ${result.option_bid:.2f} | "
@@ -536,9 +536,9 @@ class WheelStrategy(BaseOptionStrategy):
             option_type="PUT",
             direction="SHORT_PUT",
             rationale=rationale,
-            risk_reward_ratio=result.annualized_roi,  # 用年化 ROI 作为 R/R 代理
+            risk_reward_ratio=result.annualized_roi,  # Use annualized ROI as R/R proxy
             max_profit=result.option_bid,
-            max_loss=result.strike - result.option_bid,  # 行权价 - 权利金
+            max_loss=result.strike - result.option_bid,  # Strike - premium
             legs=(
                 SignalLeg(
                     action="SELL",
@@ -553,25 +553,25 @@ class WheelStrategy(BaseOptionStrategy):
 
 ---
 
-## 输出与通知增强
+## Output and Notification Enhancements
 
-### CSV 输出字段
+### CSV Output Fields
 
-在现有 `signals_*.csv` 基础上新增字段：
+New fields added to existing `signals_*.csv`:
 
-| 字段 | 说明 |
-|------|------|
-| `iv_rank` | IV 百分位 |
-| `volume` | 成交量 |
-| `open_interest` | 持仓量 |
-| `annualized_roi` | 年化收益率 |
-| `otm_probability` | OTM 概率 |
-| `days_to_expiry` | 到期天数 |
-| `option_bid` | 权利金 |
+| Field | Description |
+|-------|-------------|
+| `iv_rank` | IV percentile |
+| `volume` | Volume |
+| `open_interest` | Open interest |
+| `annualized_roi` | Annualized return |
+| `otm_probability` | OTM probability |
+| `days_to_expiry` | Days to expiry |
+| `option_bid` | Premium |
 
-### Slack 通知增强
+### Slack Notification Enhancement
 
-在 `notifications/slack.py` 中新增 `send_wheel_strategy_signals` 方法：
+Add `send_wheel_strategy_signals` method to `notifications/slack.py`:
 
 ```python
 def send_wheel_strategy_signals(
@@ -579,14 +579,14 @@ def send_wheel_strategy_signals(
     scan_results: List[PutScanResult],
     csv_path: Optional[Path] = None,
 ) -> None:
-    """发送 WheelStrategy Sell Put 机会到 Slack."""
+    """Send WheelStrategy Sell Put opportunities to Slack."""
     if not self.enabled or not scan_results:
         return
     
     lines = [f"*{self.title}* | Sell Put Opportunities | {timestamp}"]
     lines.append("")
     
-    # Top 5 推荐
+    # Top 5 Recommendations
     lines.append("*Top 5 Recommendations:*")
     for idx, result in enumerate(scan_results[:5], start=1):
         lines.append(
@@ -601,14 +601,14 @@ def send_wheel_strategy_signals(
         lines.append(f"Full results: `{csv_path}`")
     
     message = "\n".join(lines)
-    # 发送 Slack...
+    # Send Slack...
 ```
 
 ---
 
-## 配置集成
+## Configuration Integration
 
-### config.yaml 新增配置
+### config.yaml New Configuration
 
 ```yaml
 strategies:
@@ -626,7 +626,7 @@ strategies:
       max_signals_per_symbol: 3
     published_win_rate: 0.65
 
-# Black-Scholes 配置
+# Black-Scholes configuration
 black_scholes:
   risk_free_rate: 0.05
   probability_threshold: 0.60
@@ -634,117 +634,117 @@ black_scholes:
 
 ---
 
-## 测试策略
+## Testing Strategy
 
-### 单元测试
+### Unit Tests
 
-1. **BSModel 测试** (`tests/test_bs_model.py`)
-   - 验证 d1/d2 计算
-   - 验证期权价格计算（与已知参考值对比）
-   - 验证 OTM 概率计算
+1. **BSModel Tests** (`tests/test_bs_model.py`)
+   - Verify d1/d2 calculation
+   - Verify option price calculation (compare against known reference values)
+   - Verify OTM probability calculation
 
-2. **筛选器测试** (`tests/test_options_filters.py`)
-   - 每个筛选器的边界条件测试
-   - 筛选器管道组合测试
+2. **Filter Tests** (`tests/test_options_filters.py`)
+   - Boundary condition tests for each filter
+   - Filter pipeline combination tests
 
-3. **扫描器测试** (`tests/test_put_scanner.py`)
-   - 使用模拟期权链数据
-   - 验证筛选结果正确性
+3. **Scanner Tests** (`tests/test_put_scanner.py`)
+   - Use mock option chain data
+   - Verify filter result correctness
 
-4. **策略测试** (`tests/test_wheel_strategy.py`)
-   - 集成测试，验证完整流程
+4. **Strategy Tests** (`tests/test_wheel_strategy.py`)
+   - Integration test verifying complete flow
 
-### 集成测试
+### Integration Tests
 
-- 使用 IBKR 模拟账户数据
-- 验证真实市场数据下的扫描结果
-
----
-
-## 实施计划
-
-### Phase 1: 基础模型
-1. 实现 `analytics/bs_model.py`
-2. 编写单元测试
-
-### Phase 2: 筛选器
-1. 实现 `filters/options_filters.py`
-2. 编写单元测试
-
-### Phase 3: 扫描器
-1. 实现 `scanners/put_scanner.py`
-2. 编写集成测试
-
-### Phase 4: 策略集成
-1. 实现 `strategies/strategy_wheel.py`
-2. 集成到 runner.py
-3. 端到端测试
-
-### Phase 5: 输出与通知
-1. 增强 CSV 输出字段
-2. 增强 Slack 通知
-3. 用户验收测试
+- Use IBKR paper account data
+- Verify scan results under real market data
 
 ---
 
-## 风险与缓解
+## Implementation Plan
 
-| 风险 | 影响 | 缓解措施 |
-|------|------|---------|
-| IV 数据不可用 | 无法计算 IV Rank | 使用历史波动率替代，或跳过该筛选 |
-| Black-Scholes 计算误差 | 概率不准确 | 与已知参考值验证，添加误差容忍度 |
-| 超短期期权流动性差 | 无法成交 | 严格成交量/OI 筛选，设置最小流动性门槛 |
-| 早于 0 天到期 | 已到期期权 | 严格过滤 days_to_expiry > 0 |
+### Phase 1: Foundation Model
+1. Implement `analytics/bs_model.py`
+2. Write unit tests
 
----
+### Phase 2: Filters
+1. Implement `filters/options_filters.py`
+2. Write unit tests
 
-## 成功标准
+### Phase 3: Scanner
+1. Implement `scanners/put_scanner.py`
+2. Write integration tests
 
-1. **功能完整性**
-   - [ ] 所有 4 个筛选器正常工作
-   - [ ] Black-Scholes 概率计算误差 < 5%
-   - [ ] 扫描结果按年化 ROI 排序
+### Phase 4: Strategy Integration
+1. Implement `strategies/strategy_wheel.py`
+2. Integrate into runner.py
+3. End-to-end testing
 
-2. **性能指标**
-   - [ ] 单次扫描（12 只股票 × 10 个到期日）< 5 秒
-   - [ ] 内存占用 < 100MB
-
-3. **用户体验**
-   - [ ] Slack 通知显示 Top 5 推荐
-   - [ ] CSV 输出包含所有关键字段
-   - [ ] 配置参数可在 config.yaml 中调整
+### Phase 5: Output and Notifications
+1. Enhance CSV output fields
+2. Enhance Slack notifications
+3. User acceptance testing
 
 ---
 
-## 未来扩展
+## Risks and Mitigation
 
-1. **完整 Wheel 循环** - 被行权后自动切换 Covered Call 模式
-2. **动态调整** - 根据市场状态调整筛选门槛
-3. **回测支持** - 历史数据回测框架
-4. **自动交易** - 与 TradeExecutor 集成，自动提交订单
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| IV data unavailable | Cannot calculate IV Rank | Use historical volatility as proxy, or skip this filter |
+| Black-Scholes calculation error | Inaccurate probability | Validate against known reference values, add error tolerance |
+| Ultra-short term option liquidity | Cannot execute | Strict volume/OI filtering, set minimum liquidity threshold |
+| Expired options (< 0 DTE) | Invalid signals | Strict filter days_to_expiry > 0 |
 
 ---
 
-## 附录：Black-Scholes 公式参考
+## Success Criteria
 
-### d1 和 d2 计算
+1. **Functional Completeness**
+   - [ ] All 4 filters working correctly
+   - [ ] Black-Scholes probability calculation error < 5%
+   - [ ] Scan results sorted by annualized ROI
+
+2. **Performance Metrics**
+   - [ ] Single scan (12 stocks × 10 expiries) < 5 seconds
+   - [ ] Memory usage < 100MB
+
+3. **User Experience**
+   - [ ] Slack notification shows Top 5 recommendations
+   - [ ] CSV output contains all key fields
+   - [ ] Configuration parameters adjustable in config.yaml
+
+---
+
+## Future Extensions
+
+1. **Full Wheel Cycle** - Automatically switch to Covered Call mode after assignment
+2. **Dynamic Adjustment** - Adjust filter thresholds based on market regime
+3. **Backtesting Support** - Historical data backtesting framework
+4. **Automated Trading** - Integrate with TradeExecutor for automatic order submission
+
+---
+
+## Appendix: Black-Scholes Formula Reference
+
+### d1 and d2 Calculation
 
 $$d1 = \frac{\ln(S/K) + (r + \sigma^2/2)T}{\sigma\sqrt{T}}$$
 
 $$d2 = d1 - \sigma\sqrt{T}$$
 
-### Put 期权理论价格
+### Put Option Theoretical Price
 
 $$P = K e^{-rT} N(-d2) - S N(-d1)$$
 
-### Put 期权 OTM 概率
+### Put Option OTM Probability
 
 $$P(\text{OTM}) = P(S_T > K) = N(d2)$$
 
-其中：
-- $S$ = 标的价格
-- $K$ = 行权价
-- $r$ = 无风险利率
-- $\sigma$ = 隐含波动率
-- $T$ = 到期时间（年）
-- $N(x)$ = 标准正态分布累积分布函数
+Where:
+- $S$ = Underlying price
+- $K$ = Strike price
+- $r$ = Risk-free rate
+- $\sigma$ = Implied volatility
+- $T$ = Time to expiry (years)
+- $N(x)$ = Standard normal cumulative distribution function
