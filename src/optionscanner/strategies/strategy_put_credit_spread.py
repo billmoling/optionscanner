@@ -134,6 +134,7 @@ class PutCreditSpreadStrategy(BaseOptionStrategy):
                 option_type="PUT",
                 direction="BULL_PUT_CREDIT_SPREAD",
                 rationale=rationale,
+                risk_reward_ratio=risk_reward,
                 legs=(
                     SignalLeg(
                         action="SELL",

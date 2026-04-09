@@ -16,6 +16,7 @@ Requires-Dist: pyarrow
 Requires-Dist: praw
 Requires-Dist: requests
 Requires-Dist: python-logging-loki
+Requires-Dist: scipy
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: pytest-asyncio; extra == "dev"

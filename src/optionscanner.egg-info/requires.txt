@@ -10,6 +10,7 @@ pyarrow
 praw
 requests
 python-logging-loki
+scipy
 
 [dev]
 pytest

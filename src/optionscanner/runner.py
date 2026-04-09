@@ -171,13 +171,22 @@ async def run_once(
     # Save all signals to CSV for reference
     file_path = results_dir / f"signals_{timestamp}.csv"
     rows: List[Dict[str, Any]] = []
+
+    # Build a lookup for AI reasons by (strategy_name, signal) tuple
+    ai_reason_lookup: Dict[str, str] = ai_result.ai_reasons
+
     for strategy_name, signal in ai_result.selections:
+        signal_id = f"{signal.symbol}_{strategy_name}"
+        ai_reason = ai_reason_lookup.get(signal_id, "")
         rows.append({
             "symbol": signal.symbol,
             "strategy": strategy_name,
             "direction": signal.direction,
             "rationale": signal.rationale,
+            "ai_reason": ai_reason,
+            "selection_type": "AI",
         })
+
     for score in ranked_signals:
         rows.append({
             "symbol": score.signal.symbol,
@@ -185,13 +194,41 @@ async def run_once(
             "direction": score.signal.direction,
             "rationale": score.signal.rationale,
             "composite_score": score.composite_score,
+            "reason": score.reason,
+            "selection_type": "QUANT",
         })
+
     if rows:
         all_signals_df = pd.DataFrame(rows)
         all_signals_df.to_csv(file_path, index=False)
         logger.info("Saved {count} signals to {path}", count=len(all_signals_df), path=str(file_path))
     else:
         file_path = None
+
+    # Save AI selection results to JSON
+    ai_json_path = results_dir / f"gemini_signal_selection_{timestamp}.json"
+    ai_selection_data = {
+        "as_of": timestamp,
+        "prompt": ai_result.prompt,
+        "response": ai_result.response,
+        "selections": [
+            {
+                "id": idx + 1,
+                "symbol": signal.symbol,
+                "strategy": strategy_name,
+                "direction": signal.direction,
+                "reason": ai_result.ai_reasons.get(f"{signal.symbol}_{strategy_name}", ""),
+            }
+            for idx, (strategy_name, signal) in enumerate(ai_result.selections)
+        ],
+        "candidate_count": len(aggregated_signals),
+    }
+    try:
+        with open(ai_json_path, "w", encoding="utf-8") as f:
+            json.dump(ai_selection_data, f, indent=2, default=str)
+        logger.info("Saved AI selection results to {path}", path=str(ai_json_path))
+    except Exception as exc:
+        logger.warning("Failed to save AI selection results | error={error}", error=exc)
 
     # Get top 5 for execution (quantitative ranking)
     finalist_payload = [(s.strategy_name, s.signal, s.composite_score, s.reason) for s in ranked_signals]

@@ -201,6 +201,7 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
                 option_type=option_type,
                 direction=direction,
                 rationale=rationale,
+                risk_reward_ratio=risk_reward,
                 legs=(
                     SignalLeg(
                         action="BUY",

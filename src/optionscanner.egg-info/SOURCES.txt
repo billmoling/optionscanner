@@ -15,6 +15,7 @@ src/optionscanner/gemini_client_v2.py
 src/optionscanner/logging_utils.py
 src/optionscanner/main.py
 src/optionscanner/market_context.py
+src/optionscanner/market_hours.py
 src/optionscanner/market_state.py
 src/optionscanner/option_data.py
 src/optionscanner/portfolio_monitor.py
@@ -34,6 +35,8 @@ src/optionscanner.egg-info/dependency_links.txt
 src/optionscanner.egg-info/entry_points.txt
 src/optionscanner.egg-info/requires.txt
 src/optionscanner.egg-info/top_level.txt
+src/optionscanner/analytics/__init__.py
+src/optionscanner/analytics/bs_model.py
 src/optionscanner/data/__init__.py
 src/optionscanner/data/flow.py
 src/optionscanner/data/history.py
@@ -68,6 +71,7 @@ src/optionscanner/strategies/strategy_whale_following.py
 src/optionscanner/strategies/stock/tqqq_qqq_rotation.py
 tests/test_ai_agents.py
 tests/test_ai_agents_integration.py
+tests/test_bs_model.py
 tests/test_execution_integration.py
 tests/test_exit_config.py
 tests/test_flow.py
