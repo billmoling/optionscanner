@@ -195,9 +195,15 @@ class SlackNotifier:
                 direction = signal.direction.replace("_", " ").title()
                 signal_id = f"{signal.symbol}_{strategy_name}"
                 ai_reason = ai_reasons.get(signal_id, "AI selected")
+
+                # Clear action instruction
+                action = self._format_action_instruction(signal)
                 price_info = self._format_price_info(signal)
-                price_suffix = f" | {price_info}" if price_info else ""
-                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}{price_suffix}")
+
+                lines.append(f"*{idx}. {signal.symbol}* | {action}")
+                if price_info:
+                    lines.append(f"  {price_info}")
+                lines.append(f"  _Strategy_: {direction} | {strategy_name.replace('Strategy', 'Strat')}")
                 lines.append(f"  _Reason_: {ai_reason}")
             lines.append("")
 
@@ -205,10 +211,14 @@ class SlackNotifier:
         if quant_other:
             lines.append("*-- Quantitative Top Picks --*")
             for idx, score in enumerate(quant_other, start=1):
-                direction = score.signal.direction.replace("_", " ").title()
-                price_info = self._format_price_info(score.signal)
-                price_suffix = f" | {price_info}" if price_info else ""
-                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}{price_suffix}")
+                signal = score.signal
+                action = self._format_action_instruction(signal)
+                price_info = self._format_price_info(signal)
+
+                lines.append(f"*{idx}. {signal.symbol}* | {action}")
+                if price_info:
+                    lines.append(f"  {price_info}")
+                lines.append(f"  _Score_: {score.composite_score:.2f} | {score.strategy_name.replace('Strategy', 'Strat')}")
                 lines.append(f"  _Reason_: {score.reason}")
             lines.append("")
 
@@ -217,17 +227,23 @@ class SlackNotifier:
             lines.append("*-- Cash Secured Puts --*")
             idx = 1
             for strategy_name, signal in ai_cash_secured:
+                expiry_str = signal.expiry.strftime("%Y-%m-%d") if hasattr(signal.expiry, "strftime") else str(signal.expiry)
                 price_info = self._format_price_info(signal)
-                direction = signal.direction.replace("_", " ").title()
-                price_suffix = f" | {price_info}" if price_info else ""
-                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}{price_suffix}")
+
+                # Clear SELL PUT instruction
+                lines.append(f"*{idx}. {signal.symbol}* | SELL PUT @ ${signal.strike:.0f} strike, exp {expiry_str}")
+                if price_info:
+                    lines.append(f"  {price_info}")
                 lines.append(f"  _Reason_: {ai_reasons.get(f'{signal.symbol}_{strategy_name}', signal.rationale)}")
                 idx += 1
+
             for score in quant_cash_secured:
+                expiry_str = score.signal.expiry.strftime("%Y-%m-%d") if hasattr(score.signal.expiry, "strftime") else str(score.signal.expiry)
                 price_info = self._format_price_info(score.signal)
-                direction = score.signal.direction.replace("_", " ").title()
-                price_suffix = f" | {price_info}" if price_info else ""
-                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}{price_suffix}")
+
+                lines.append(f"*{idx}. {score.signal.symbol}* | SELL PUT @ ${score.signal.strike:.0f} strike, exp {expiry_str}")
+                if price_info:
+                    lines.append(f"  {price_info}")
                 lines.append(f"  _Reason_: {score.reason}")
                 idx += 1
             lines.append("")
@@ -237,17 +253,33 @@ class SlackNotifier:
             lines.append("*-- Credit Spreads --*")
             idx = 1
             for strategy_name, signal in ai_credit:
+                expiry_str = signal.expiry.strftime("%Y-%m-%d") if hasattr(signal.expiry, "strftime") else str(signal.expiry)
                 price_info = self._format_price_info(signal)
-                direction = signal.direction.replace("_", " ").title()
-                price_suffix = f" | {price_info}" if price_info else ""
-                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}{price_suffix}")
+
+                # Determine action based on direction
+                if "PUT" in signal.direction:
+                    action = "SELL PUT CREDIT SPREAD"
+                else:
+                    action = "SELL CALL CREDIT SPREAD"
+
+                lines.append(f"*{idx}. {signal.symbol}* | {action} @ ${signal.strike:.0f} strike, exp {expiry_str}")
+                if price_info:
+                    lines.append(f"  {price_info}")
                 lines.append(f"  _Reason_: {ai_reasons.get(f'{signal.symbol}_{strategy_name}', signal.rationale)}")
                 idx += 1
+
             for score in quant_credit:
+                expiry_str = score.signal.expiry.strftime("%Y-%m-%d") if hasattr(score.signal.expiry, "strftime") else str(score.signal.expiry)
                 price_info = self._format_price_info(score.signal)
-                direction = score.signal.direction.replace("_", " ").title()
-                price_suffix = f" | {price_info}" if price_info else ""
-                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}{price_suffix}")
+
+                if "PUT" in score.signal.direction:
+                    action = "SELL PUT CREDIT SPREAD"
+                else:
+                    action = "SELL CALL CREDIT SPREAD"
+
+                lines.append(f"*{idx}. {score.signal.symbol}* | {action} @ ${score.signal.strike:.0f} strike, exp {expiry_str}")
+                if price_info:
+                    lines.append(f"  {price_info}")
                 lines.append(f"  _Reason_: {score.reason}")
                 idx += 1
             lines.append("")
@@ -257,17 +289,33 @@ class SlackNotifier:
             lines.append("*-- PMCC --*")
             idx = 1
             for strategy_name, signal in ai_pmcc:
+                expiry_str = signal.expiry.strftime("%Y-%m-%d") if hasattr(signal.expiry, "strftime") else str(signal.expiry)
                 price_info = self._format_price_info(signal)
-                direction = signal.direction.replace("_", " ").title()
-                price_suffix = f" | {price_info}" if price_info else ""
-                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}{price_suffix}")
+
+                # Determine action based on direction
+                if "LONG" in signal.direction:
+                    action = "BUY CALL (LEAPS)"
+                else:
+                    action = "SELL CALL"
+
+                lines.append(f"*{idx}. {signal.symbol}* | {action} @ ${signal.strike:.0f} strike, exp {expiry_str}")
+                if price_info:
+                    lines.append(f"  {price_info}")
                 lines.append(f"  _Reason_: {ai_reasons.get(f'{signal.symbol}_{strategy_name}', signal.rationale)}")
                 idx += 1
+
             for score in quant_pmcc:
+                expiry_str = score.signal.expiry.strftime("%Y-%m-%d") if hasattr(score.signal.expiry, "strftime") else str(score.signal.expiry)
                 price_info = self._format_price_info(score.signal)
-                direction = score.signal.direction.replace("_", " ").title()
-                price_suffix = f" | {price_info}" if price_info else ""
-                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}{price_suffix}")
+
+                if "LONG" in score.signal.direction:
+                    action = "BUY CALL (LEAPS)"
+                else:
+                    action = "SELL CALL"
+
+                lines.append(f"*{idx}. {score.signal.symbol}* | {action} @ ${score.signal.strike:.0f} strike, exp {expiry_str}")
+                if price_info:
+                    lines.append(f"  {price_info}")
                 lines.append(f"  _Reason_: {score.reason}")
                 idx += 1
             lines.append("")
@@ -303,6 +351,29 @@ class SlackNotifier:
             parts.append(f"Max Loss: ${signal.max_loss:.2f}")
 
         return " | ".join(parts) if parts else ""
+
+    def _format_action_instruction(self, signal: "TradeSignal") -> str:
+        """Format clear BUY/SELL action instruction.
+
+        Returns strings like:
+        - "BUY CALL @ $105 strike, exp 2026-04-25"
+        - "SELL PUT @ $95 strike, exp 2026-04-18"
+        """
+        # Determine BUY or SELL based on direction
+        buy_directions = {"BULL_CALL_DEBIT_SPREAD", "BEAR_PUT_DEBIT_SPREAD", "LONG_PMCC_LEAPS", "SHORT_CONDOR_CALL", "LONG_CONDOR_CALL", "LONG_CONDOR_PUT"}
+        action = "BUY" if signal.direction in buy_directions or signal.entry_price is not None and signal.entry_price > 0 else "SELL"
+
+        # Map direction to option type action
+        if "CALL" in signal.direction:
+            option_type = "CALL"
+        elif "PUT" in signal.direction:
+            option_type = "PUT"
+        else:
+            option_type = signal.option_type
+
+        expiry_str = signal.expiry.strftime("%Y-%m-%d") if hasattr(signal.expiry, "strftime") else str(signal.expiry)
+
+        return f"{action} {option_type} @ ${signal.strike:.0f} strike, exp {expiry_str}"
 
     def _build_ranked_message(
         self,
