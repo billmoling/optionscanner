@@ -123,6 +123,15 @@ strategies:
       confirmation_sessions: 5
       enabled: false
     published_win_rate: 0.55
+  WheelStrategy:
+    params:
+      min_iv_rank: 0.30
+      min_volume: 500
+      min_annualized_roi: 0.30
+      min_otm_probability: 0.60
+      max_days_to_expiry: 15
+      min_days_to_expiry: 0
+    published_win_rate: 0.65
   TqqqQqqRotationStrategy:
     params:
       enabled: true
