@@ -45,6 +45,8 @@ src/optionscanner/entry/__init__.py
 src/optionscanner/entry/patterns.py
 src/optionscanner/exit/__init__.py
 src/optionscanner/exit/config.py
+src/optionscanner/filters/__init__.py
+src/optionscanner/filters/options_filters.py
 src/optionscanner/notifications/__init__.py
 src/optionscanner/notifications/slack.py
 src/optionscanner/portfolio/__init__.py
@@ -57,6 +59,8 @@ src/optionscanner/portfolio/report.py
 src/optionscanner/portfolio/rules.py
 src/optionscanner/regime/__init__.py
 src/optionscanner/regime/detector.py
+src/optionscanner/scanners/__init__.py
+src/optionscanner/scanners/put_scanner.py
 src/optionscanner/strategies/__init__.py
 src/optionscanner/strategies/base.py
 src/optionscanner/strategies/strategy_covered_call.py
@@ -68,6 +72,7 @@ src/optionscanner/strategies/strategy_tqqq_rotation.py
 src/optionscanner/strategies/strategy_vertical_spread.py
 src/optionscanner/strategies/strategy_vix_fear_fade.py
 src/optionscanner/strategies/strategy_whale_following.py
+src/optionscanner/strategies/strategy_wheel.py
 src/optionscanner/strategies/stock/tqqq_qqq_rotation.py
 tests/test_ai_agents.py
 tests/test_ai_agents_integration.py
@@ -83,10 +88,12 @@ tests/test_loki_integration.py
 tests/test_main.py
 tests/test_market_hours.py
 tests/test_market_state.py
+tests/test_options_filters.py
 tests/test_patterns.py
 tests/test_portfolio_evaluation.py
 tests/test_portfolio_manager.py
 tests/test_position_cache.py
+tests/test_put_scanner.py
 tests/test_regime_detector.py
 tests/test_runner.py
 tests/test_scheduler.py
@@ -95,3 +102,4 @@ tests/test_slack_notifier.py
 tests/test_slack_notifier_integration.py
 tests/test_strategies.py
 tests/test_whale_detector.py
+tests/test_wheel_strategy.py
