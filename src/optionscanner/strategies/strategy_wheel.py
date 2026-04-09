@@ -190,6 +190,10 @@ class WheelStrategy(BaseOptionStrategy):
             direction="SELL_PUT",
             rationale=rationale,
             risk_reward_ratio=result.annualized_roi,
+            max_profit=result.mid_price,           # Premium received
+            max_loss=result.strike * 100,          # Cash-secured = strike price × 100
+            entry_price=-result.mid_price,         # Negative = credit received
+            underlying_price=result.underlying_price,
             legs=(
                 SignalLeg(
                     action="SELL",

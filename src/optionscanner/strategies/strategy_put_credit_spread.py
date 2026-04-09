@@ -135,6 +135,10 @@ class PutCreditSpreadStrategy(BaseOptionStrategy):
                 direction="BULL_PUT_CREDIT_SPREAD",
                 rationale=rationale,
                 risk_reward_ratio=risk_reward,
+                max_profit=net_credit,      # Max profit = credit received
+                max_loss=max_loss,          # Max loss = width - credit
+                entry_price=-net_credit,    # Negative = credit received
+                underlying_price=underlying_price,
                 legs=(
                     SignalLeg(
                         action="SELL",

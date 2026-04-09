@@ -171,26 +171,106 @@ class SlackNotifier:
                 lines.extend(context_lines)
                 lines.append("")
 
-        # AI Picks section
-        if ai_selections:
-            lines.append("*-- AI Top Picks --*")
+        # Categorize signals by strategy type
+        cash_secured_strategies = {"WheelStrategy"}
+        credit_strategies = {"PutCreditSpreadStrategy", "IronCondorStrategy"}
+        pmcc_strategies = {"PoorMansCoveredCallStrategy"}
 
-            for idx, (strategy_name, signal) in enumerate(ai_selections, start=1):
+        # Categorize AI selections
+        ai_cash_secured = [(s, sig) for s, sig in ai_selections if s in cash_secured_strategies]
+        ai_credit = [(s, sig) for s, sig in ai_selections if s in credit_strategies]
+        ai_pmcc = [(s, sig) for s, sig in ai_selections if s in pmcc_strategies]
+        ai_other = [(s, sig) for s, sig in ai_selections if s not in cash_secured_strategies and s not in credit_strategies and s not in pmcc_strategies]
+
+        # Categorize quant picks
+        quant_cash_secured = [s for s in quant_picks if s.strategy_name in cash_secured_strategies]
+        quant_credit = [s for s in quant_picks if s.strategy_name in credit_strategies]
+        quant_pmcc = [s for s in quant_picks if s.strategy_name in pmcc_strategies]
+        quant_other = [s for s in quant_picks if s.strategy_name not in cash_secured_strategies and s.strategy_name not in credit_strategies and s.strategy_name not in pmcc_strategies]
+
+        # AI Picks section - only non-credit strategies
+        if ai_other:
+            lines.append("*-- AI Top Picks --*")
+            for idx, (strategy_name, signal) in enumerate(ai_other, start=1):
                 direction = signal.direction.replace("_", " ").title()
                 signal_id = f"{signal.symbol}_{strategy_name}"
                 ai_reason = ai_reasons.get(signal_id, "AI selected")
-                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}")
+                price_info = self._format_price_info(signal)
+                price_suffix = f" | {price_info}" if price_info else ""
+                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}{price_suffix}")
                 lines.append(f"  _Reason_: {ai_reason}")
             lines.append("")
 
-        # Quantitative Picks section
-        if quant_picks:
+        # Quantitative Picks section - only non-credit strategies
+        if quant_other:
             lines.append("*-- Quantitative Top Picks --*")
-
-            for idx, score in enumerate(quant_picks, start=1):
+            for idx, score in enumerate(quant_other, start=1):
                 direction = score.signal.direction.replace("_", " ").title()
-                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}")
+                price_info = self._format_price_info(score.signal)
+                price_suffix = f" | {price_info}" if price_info else ""
+                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}{price_suffix}")
                 lines.append(f"  _Reason_: {score.reason}")
+            lines.append("")
+
+        # Cash Secured Puts section
+        if ai_cash_secured or quant_cash_secured:
+            lines.append("*-- Cash Secured Puts --*")
+            idx = 1
+            for strategy_name, signal in ai_cash_secured:
+                price_info = self._format_price_info(signal)
+                direction = signal.direction.replace("_", " ").title()
+                price_suffix = f" | {price_info}" if price_info else ""
+                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}{price_suffix}")
+                lines.append(f"  _Reason_: {ai_reasons.get(f'{signal.symbol}_{strategy_name}', signal.rationale)}")
+                idx += 1
+            for score in quant_cash_secured:
+                price_info = self._format_price_info(score.signal)
+                direction = score.signal.direction.replace("_", " ").title()
+                price_suffix = f" | {price_info}" if price_info else ""
+                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}{price_suffix}")
+                lines.append(f"  _Reason_: {score.reason}")
+                idx += 1
+            lines.append("")
+
+        # Credit Spreads section
+        if ai_credit or quant_credit:
+            lines.append("*-- Credit Spreads --*")
+            idx = 1
+            for strategy_name, signal in ai_credit:
+                price_info = self._format_price_info(signal)
+                direction = signal.direction.replace("_", " ").title()
+                price_suffix = f" | {price_info}" if price_info else ""
+                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}{price_suffix}")
+                lines.append(f"  _Reason_: {ai_reasons.get(f'{signal.symbol}_{strategy_name}', signal.rationale)}")
+                idx += 1
+            for score in quant_credit:
+                price_info = self._format_price_info(score.signal)
+                direction = score.signal.direction.replace("_", " ").title()
+                price_suffix = f" | {price_info}" if price_info else ""
+                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}{price_suffix}")
+                lines.append(f"  _Reason_: {score.reason}")
+                idx += 1
+            lines.append("")
+
+        # PMCC section
+        if ai_pmcc or quant_pmcc:
+            lines.append("*-- PMCC --*")
+            idx = 1
+            for strategy_name, signal in ai_pmcc:
+                price_info = self._format_price_info(signal)
+                direction = signal.direction.replace("_", " ").title()
+                price_suffix = f" | {price_info}" if price_info else ""
+                lines.append(f"*{idx}. {signal.symbol}* | {direction} | {strategy_name.replace('Strategy', 'Strat')}{price_suffix}")
+                lines.append(f"  _Reason_: {ai_reasons.get(f'{signal.symbol}_{strategy_name}', signal.rationale)}")
+                idx += 1
+            for score in quant_pmcc:
+                price_info = self._format_price_info(score.signal)
+                direction = score.signal.direction.replace("_", " ").title()
+                price_suffix = f" | {price_info}" if price_info else ""
+                lines.append(f"*{idx}. {score.signal.symbol}* | {direction} | {score.strategy_name.replace('Strategy', 'Strat')} | Score: {score.composite_score:.2f}{price_suffix}")
+                lines.append(f"  _Reason_: {score.reason}")
+                idx += 1
+            lines.append("")
 
         # Footer
         if csv_path:
@@ -198,6 +278,31 @@ class SlackNotifier:
             lines.append(f"Full results: `{csv_path}`")
 
         return "\n".join(lines)
+
+    def _format_price_info(self, signal: "TradeSignal") -> str:
+        """Format price information for a signal.
+
+        Args:
+            signal: TradeSignal with optional price fields
+
+        Returns:
+            Formatted price string like "Entry: Credit $1.50 | Max Profit: $1.50 | Max Loss: $3.50"
+        """
+        parts = []
+
+        if signal.entry_price is not None:
+            if signal.entry_price < 0:
+                parts.append(f"Entry: Credit ${abs(signal.entry_price):.2f}")
+            else:
+                parts.append(f"Entry: Debit ${signal.entry_price:.2f}")
+
+        if signal.max_profit is not None:
+            parts.append(f"Max Profit: ${signal.max_profit:.2f}")
+
+        if signal.max_loss is not None:
+            parts.append(f"Max Loss: ${signal.max_loss:.2f}")
+
+        return " | ".join(parts) if parts else ""
 
     def _build_ranked_message(
         self,

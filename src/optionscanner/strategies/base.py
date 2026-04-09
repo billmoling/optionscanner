@@ -43,6 +43,12 @@ class TradeSignal:
     max_profit: Optional[float] = None
     max_loss: Optional[float] = None
 
+    # Additional fields for actionable trading information
+    entry_price: Optional[float] = None       # Net debit/credit (positive = debit paid, negative = credit received)
+    target_price: Optional[float] = None      # Target exit price
+    stop_loss: Optional[float] = None         # Stop loss level
+    underlying_price: Optional[float] = None  # Underlying stock price at signal time
+
 
 class BaseOptionStrategy(Strategy, abc.ABC):
     """Abstract base class for option strategies using NautilusTrader."""

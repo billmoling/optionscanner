@@ -287,6 +287,9 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
             short_theta=candidate["short_theta"],
         )
 
+        leaps_price = candidate["net_debit"] + candidate["credit"]  # Full LEAPS price
+        underlying_price = candidate.get("underlying_price")
+
         signals = [
             self.emit_signal(
                 TradeSignal(
@@ -297,6 +300,10 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
                     direction="LONG_PMCC_LEAPS",
                     rationale=rationale,
                     legs=legs,
+                    entry_price=leaps_price,       # Debit paid for LEAPS
+                    max_profit=candidate["credit"], # Max profit = credit received
+                    max_loss=leaps_price,           # Max loss = debit paid
+                    underlying_price=underlying_price,
                 )
             ),
             self.emit_signal(
@@ -308,6 +315,10 @@ class PoorMansCoveredCallStrategy(BaseOptionStrategy):
                     direction="SHORT_PMCC_CALL",
                     rationale=rationale,
                     legs=legs,
+                    entry_price=-candidate["credit"],  # Credit received (negative)
+                    max_profit=candidate["credit"],    # Max profit = credit received
+                    max_loss=leaps_price,              # Max loss = LEAPS debit at risk
+                    underlying_price=underlying_price,
                 )
             ),
         ]

@@ -202,6 +202,10 @@ class VerticalSpreadStrategy(BaseOptionStrategy):
                 direction=direction,
                 rationale=rationale,
                 risk_reward_ratio=risk_reward,
+                max_profit=max_profit,
+                max_loss=max_loss,
+                entry_price=net_debit,  # Net debit paid (positive)
+                underlying_price=underlying_price,
                 legs=(
                     SignalLeg(
                         action="BUY",

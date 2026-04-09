@@ -118,6 +118,9 @@ class IronCondorStrategy(BaseOptionStrategy):
             expiry = condor["expiry"]
             symbol = condor["symbol"]
             legs = self._condor_legs(condor)
+            total_credit = condor["total_credit"]
+            max_loss = (self.spread_width * 100) - (total_credit * 100)
+            underlying_price = self._resolve_underlying_price(None, calls) or 0.0
 
             def add_signal(option_row: pd.Series, direction: str) -> None:
                 signals.append(
@@ -130,6 +133,10 @@ class IronCondorStrategy(BaseOptionStrategy):
                             direction=direction,
                             rationale=rationale,
                             legs=legs,
+                            entry_price=-total_credit / 4,  # Approximate per-leg credit (negative)
+                            max_profit=total_credit / 4,    # Max profit per leg
+                            max_loss=max_loss / 4,          # Max loss per leg
+                            underlying_price=underlying_price,
                         )
                     )
                 )
